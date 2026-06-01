@@ -91,3 +91,9 @@ LangScope/
 - EasyOCR models are also downloaded once (~200 MB for Latin-script languages).
 - Non-Latin scripts (Russian, Chinese, Japanese, Arabic) use separate EasyOCR models.
 - The screenshot interval is approximately 2 seconds for OCR and 0.3 seconds for the preview refresh.
+
+---
+
+## Roadmap
+
+- Real-time live feed translation: instead of periodic screenshots, future versions will capture and translate screen content as a continuous video stream, eliminating the screenshot interval and enabling instant translation as text appears on screen.
