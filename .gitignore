@@ -1,0 +1,50 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── ML model caches (can be hundreds of MB — re-downloaded on first run) ──────
+# EasyOCR models (~200 MB each)
+.EasyOCR/
+
+# Argos Translate packages (~100 MB each) — stored in ~/.local/share/argos-translate
+# Not in project dir but listed here for clarity
+
+# PaddleOCR / PaddlePaddle cache
+~/.paddlex/
+
+# PyTorch hub cache
+~/.cache/torch/
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+diag_ocr.py
+_patch_main.py
+
+# ── Secrets / env ─────────────────────────────────────────────────────────────
+.env
+.env.*
+secrets.py

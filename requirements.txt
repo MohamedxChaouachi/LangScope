@@ -1,0 +1,15 @@
+# Live Translator — Python dependencies
+# Install with: pip install -r requirements.txt
+#
+# Note: PaddlePaddle ships separately because the GPU/CPU variant must
+# match your hardware. Install the correct wheel FIRST, then run this file.
+#
+#   CPU-only (most users):
+#       pip install paddlepaddle
+#   NVIDIA GPU:
+#       pip install paddlepaddle-gpu
+
+PyQt6>=6.6.0
+mss>=9.0.1
+paddleocr>=2.7.0
+numpy>=1.24.0
