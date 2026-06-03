@@ -1,0 +1,111 @@
+"""
+overlay_window.py — Optional click-through desktop overlay.
+
+Paints translated text directly over the capture region on the desktop.
+The window is:
+  - Frameless / transparent background
+  - Always-on-top
+  - Click-through (Qt.WindowTransparentForInput)
+
+Enable/disable via OverlayWindow.set_active(bool).
+Update content via OverlayWindow.update_regions(regions, region_rect).
+"""
+from __future__ import annotations
+
+import numpy as np
+
+from PyQt6.QtCore  import Qt, QRect
+from PyQt6.QtGui   import (QPainter, QColor, QFont, QFontMetrics,
+                            QPaintEvent, QKeyEvent)
+from PyQt6.QtWidgets import QApplication, QWidget
+
+from models import TranslationRegion
+
+
+class OverlayWindow(QWidget):
+    """
+    Transparent, always-on-top, click-through overlay window.
+
+    Positioned exactly over the capture region so translated text appears
+    in-place on the real desktop rather than inside the control panel.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent,
+            Qt.WindowType.FramelessWindowHint        |
+            Qt.WindowType.WindowStaysOnTopHint       |
+            Qt.WindowType.Tool                       |
+            Qt.WindowType.WindowTransparentForInput,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self._regions: list[TranslationRegion] = []
+        self._active   = False
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_active(self, active: bool) -> None:
+        self._active = active
+        if active:
+            self.show()
+            self.raise_()
+        else:
+            self.hide()
+
+    def update_regions(
+        self,
+        regions:     list[TranslationRegion],
+        capture_rect: dict,           # {"top", "left", "width", "height"}
+    ) -> None:
+        """Reposition window over capture region and update displayed regions."""
+        if not self._active:
+            return
+        self.setGeometry(
+            capture_rect["left"], capture_rect["top"],
+            capture_rect["width"], capture_rect["height"],
+        )
+        self._regions = regions
+        self.update()
+
+    # ── Paint ─────────────────────────────────────────────────────────────────
+
+    def paintEvent(self, _: QPaintEvent) -> None:
+        if not self._active or not self._regions:
+            return
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+
+        for reg in self._regions:
+            if not reg.has_translation:
+                continue
+
+            pts  = np.array(reg.bbox, dtype=float)
+            x1   = int(pts[:, 0].min())
+            y1   = int(pts[:, 1].min())
+            x2   = int(pts[:, 0].max())
+            y2   = int(pts[:, 1].max())
+            bw   = max(1, x2 - x1)
+            bh   = max(1, y2 - y1)
+
+            font_pt = max(6, int(bh * 0.72))
+            font    = QFont("Segoe UI", font_pt, QFont.Weight.Bold)
+            fm      = QFontMetrics(font)
+            text_w  = fm.horizontalAdvance(reg.translated_text)
+            bg_w    = max(bw, text_w + 8)
+
+            p.fillRect(x1, y1, bg_w, bh, QColor(10, 12, 30, 220))
+            p.setFont(font)
+            p.setPen(QColor("#E0F7FA"))
+            p.drawText(
+                QRect(x1 + 4, y1, bg_w - 4, bh),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                reg.translated_text,
+            )
+
+    def keyPressEvent(self, e: QKeyEvent) -> None:
+        if e.key() == Qt.Key.Key_Escape:
+            self.set_active(False)
+        else:
+            super().keyPressEvent(e)

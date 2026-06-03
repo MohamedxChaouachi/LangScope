@@ -1,15 +1,19 @@
-# Live Translator — Python dependencies
+# Live Translator / LangScope — Python dependencies
 # Install with: pip install -r requirements.txt
 #
-# Note: PaddlePaddle ships separately because the GPU/CPU variant must
-# match your hardware. Install the correct wheel FIRST, then run this file.
+# PyTorch (with CUDA) must be pre-installed in your conda environment.
+# The engine uses EasyOCR + GPU acceleration via torch.cuda.
 #
-#   CPU-only (most users):
-#       pip install paddlepaddle
-#   NVIDIA GPU:
-#       pip install paddlepaddle-gpu
+# Optional high-performance capture backend (Windows only):
+#   pip install dxcam
+# Falls back to mss automatically if dxcam is unavailable.
 
 PyQt6>=6.6.0
 mss>=9.0.1
-paddleocr>=2.7.0
+easyocr>=1.7.0
 numpy>=1.24.0
+langdetect>=1.0.9
+argostranslate>=1.9.0
+
+# Optional — install separately for best capture performance on Windows:
+# dxcam

@@ -2,10 +2,13 @@
 ui.py — Live Translator UI
 
 LiveFeedWidget renders:
-  1. The live screen capture frame.
-  2. For each detected text region: a filled background rectangle that covers
-     the original text, then the translated text drawn at a font size matched
-     to the detected bounding-box height.
+  1. The live screen capture frame (updated at ~60 FPS by render timer).
+  2. For each TranslationRegion: a filled background covering the original
+     text, then the translated text drawn at a font size matched to bbox height.
+
+ControlPanel adds:
+  - Overlay Mode toggle checkbox
+  - Live FPS counter in the status bar
 """
 
 from __future__ import annotations
@@ -14,12 +17,13 @@ import numpy as np
 
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QApplication, QComboBox, QFrame, QSizePolicy,
+    QPushButton, QApplication, QComboBox, QFrame,
+    QSizePolicy, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QRect, QRectF, QPoint, pyqtSignal
-from PyQt6.QtGui import (
-    QFont, QFontMetrics, QPainter, QColor, QPen, QPixmap, QImage,
-    QKeyEvent, QMouseEvent, QPaintEvent,
+from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
+from PyQt6.QtGui  import (
+    QFont, QFontMetrics, QPainter, QColor, QPen,
+    QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,7 +49,7 @@ _DEFAULT_TO_IDX   = 1   # French
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RegionSelector
+# RegionSelector  (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RegionSelector(QWidget):
@@ -54,7 +58,7 @@ class RegionSelector(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._origin: QPoint | None = None
+        self._origin:  QPoint | None = None
         self._current: QPoint | None = None
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
@@ -107,7 +111,7 @@ class RegionSelector(QWidget):
             p.setFont(QFont("Segoe UI", 14))
             p.drawText(
                 self.rect(), Qt.AlignmentFlag.AlignCenter,
-                "Click and drag to select the capture region\n(ESC to cancel)"
+                "Click and drag to select the capture region\n(ESC to cancel)",
             )
 
     def _rect(self) -> QRect:
@@ -120,10 +124,10 @@ class RegionSelector(QWidget):
 
 class LiveFeedWidget(QWidget):
     """
-    Displays the captured screen frame.
-    For each detected text region it:
-      1. Fills the bbox with a dark background to cover the original text.
-      2. Draws the translated text at a font size proportional to bbox height.
+    Renders the latest captured frame plus translated-text overlays.
+    update_frame() is called by the 60 FPS render timer in main.py.
+    The detections argument is list[(bbox, original_text, translated_text)]
+    which matches both the legacy engine.py format and the new pipeline.
     """
 
     _PLACEHOLDER = "📺  Select a region and press  ▶ Start\nto see the live preview"
@@ -131,32 +135,25 @@ class LiveFeedWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(250)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._pixmap:     QPixmap | None = None
-        self._detections: list           = []   # list of (bbox, original, translated)
+        self._detections: list           = []
         self._orig_w:     int            = 1
         self._orig_h:     int            = 1
 
     def update_frame(
         self,
-        frame_bgr: np.ndarray,
+        frame_bgr:  np.ndarray,
         detections: list,
-        orig_w: int,
-        orig_h: int,
+        orig_w:     int,
+        orig_h:     int,
     ) -> None:
-        """Called from main thread every FRAME_INTERVAL."""
+        """Called from the main thread every ~16 ms by the render timer."""
         self._detections = detections
         self._orig_w     = max(1, orig_w)
         self._orig_h     = max(1, orig_h)
-
-        # BGR → RGB → QPixmap
-        rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
-        qimg = QImage(
-            rgb.data, orig_w, orig_h, orig_w * 3,
-            QImage.Format.Format_RGB888,
-        )
+        rgb  = np.ascontiguousarray(frame_bgr[:, :, ::-1])
+        qimg = QImage(rgb.data, orig_w, orig_h, orig_w * 3, QImage.Format.Format_RGB888)
         self._pixmap = QPixmap.fromImage(qimg.copy())
         self.update()
 
@@ -175,13 +172,11 @@ class LiveFeedWidget(QWidget):
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._PLACEHOLDER)
             return
 
-        # ── Scale frame to fit widget (letterboxed) ───────────────────────────
         scaled = self._pixmap.scaled(
             W, H,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        # Offset of the frame inside the widget (for centering)
         px = (W - scaled.width())  // 2
         py = (H - scaled.height()) // 2
 
@@ -191,44 +186,31 @@ class LiveFeedWidget(QWidget):
         if not self._detections:
             return
 
-        # ── Render per-region translation overlays ────────────────────────────
-        scale_x = scaled.width()  / self._orig_w
-        scale_y = scaled.height() / self._orig_h
+        sx = scaled.width()  / self._orig_w
+        sy = scaled.height() / self._orig_h
 
         for bbox, original, translated in self._detections:
-            # Pass-through (numeric, already target lang, same-lang) — no overlay
             if not translated or translated == original:
                 continue
-
-            # Bounding box corners → display coordinates
             pts  = np.array(bbox, dtype=float)
-            x1   = int(pts[:, 0].min() * scale_x) + px
-            y1   = int(pts[:, 1].min() * scale_y) + py
-            x2   = int(pts[:, 0].max() * scale_x) + px
-            y2   = int(pts[:, 1].max() * scale_y) + py
+            x1   = int(pts[:, 0].min() * sx) + px
+            y1   = int(pts[:, 1].min() * sy) + py
+            x2   = int(pts[:, 0].max() * sx) + px
+            y2   = int(pts[:, 1].max() * sy) + py
+            bw   = max(1, x2 - x1)
+            bh   = max(1, y2 - y1)
 
-            box_w = max(1, x2 - x1)
-            box_h = max(1, y2 - y1)
-
-            # 1. Fill original text area with opaque dark background
-            p.fillRect(x1, y1, box_w, box_h, QColor(10, 12, 30, 235))
-
-            # 2. Draw translated text at the same font size as the original.
-            #    If the translation is longer, the dark background expands to fit —
-            #    no shrinking, no clipping.
-            font_pt = max(6, int(box_h * 0.72))
+            font_pt = max(6, int(bh * 0.72))
             font    = QFont("Segoe UI", font_pt, QFont.Weight.Bold)
             fm      = QFontMetrics(font)
             text_w  = fm.horizontalAdvance(translated)
+            bg_w    = max(bw, text_w + 8)
 
-            # Background: at least as wide as the original bbox, wider if needed
-            bg_w = max(box_w, text_w + 8)
-            p.fillRect(x1, y1, bg_w, box_h, QColor(10, 12, 30, 235))
-
+            p.fillRect(x1, y1, bg_w, bh, QColor(10, 12, 30, 235))
             p.setFont(font)
             p.setPen(QColor("#E0F7FA"))
             p.drawText(
-                QRect(x1 + 4, y1, bg_w - 4, box_h),
+                QRect(x1 + 4, y1, bg_w - 4, bh),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 translated,
             )
@@ -243,12 +225,12 @@ class ControlPanel(QWidget):
     stop_requested        = pyqtSignal()
     region_changed        = pyqtSignal(int, int, int, int)
     language_pair_changed = pyqtSignal(str, str)
+    overlay_toggled       = pyqtSignal(bool)   # NEW
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = False
         self.setWindowTitle("LangScope")
-        # Resizable — user can drag the window edge to make it bigger
         self.setMinimumWidth(460)
         self.setMinimumHeight(420)
         self.resize(520, 680)
@@ -300,7 +282,7 @@ class ControlPanel(QWidget):
         self._region_label.setWordWrap(True)
         root.addWidget(self._region_label)
 
-        # Buttons
+        # Buttons row
         btn_row = QHBoxLayout(); btn_row.setSpacing(10)
         self._select_btn = QPushButton("🖱  Select Region")
         self._select_btn.setObjectName("secondary")
@@ -313,17 +295,31 @@ class ControlPanel(QWidget):
         btn_row.addWidget(self._start_btn)
         root.addLayout(btn_row)
 
+        # Overlay toggle
+        overlay_row = QHBoxLayout()
+        self._overlay_chk = QCheckBox("🖥  Desktop Overlay Mode")
+        self._overlay_chk.setObjectName("overlay_chk")
+        self._overlay_chk.toggled.connect(self.overlay_toggled.emit)
+        overlay_row.addWidget(self._overlay_chk)
+        overlay_row.addStretch()
+        root.addLayout(overlay_row)
+
         root.addWidget(self._sep())
 
-        # Live feed — takes all remaining vertical space
+        # Live feed
         root.addWidget(self._lbl("📺  Live Feed  +  In-Place Translation"))
         self._feed = LiveFeedWidget()
         root.addWidget(self._feed, stretch=1)
 
-        # Status bar
+        # Status bar row: status text + FPS counter
+        status_row = QHBoxLayout()
         self._status = QLabel("Ready — select a region to begin")
         self._status.setObjectName("status")
-        root.addWidget(self._status)
+        status_row.addWidget(self._status, stretch=1)
+        self._fps_label = QLabel("")
+        self._fps_label.setObjectName("fps")
+        status_row.addWidget(self._fps_label)
+        root.addLayout(status_row)
 
         self.setLayout(root)
 
@@ -336,11 +332,11 @@ class ControlPanel(QWidget):
         f = QFrame(); f.setFrameShape(QFrame.Shape.HLine)
         f.setObjectName("separator"); return f
 
-    def _combo(self, default_idx: int) -> QComboBox:
+    def _combo(self, idx: int) -> QComboBox:
         c = QComboBox(); c.setObjectName("combo")
         for name, code in ALL_LANGUAGES:
             c.addItem(name, userData=code)
-        c.setCurrentIndex(default_idx)
+        c.setCurrentIndex(idx)
         return c
 
     # ── Slots ─────────────────────────────────────────────────────────────────
@@ -380,17 +376,15 @@ class ControlPanel(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def update_live_feed(
-        self,
-        frame_bgr,
-        detections: list,
-        orig_w: int,
-        orig_h: int,
-    ) -> None:
+    def update_live_feed(self, frame_bgr, detections: list,
+                         orig_w: int, orig_h: int) -> None:
         self._feed.update_frame(frame_bgr, detections, orig_w, orig_h)
 
     def set_status(self, text: str) -> None:
         self._status.setText(text)
+
+    def set_fps(self, fps: float) -> None:
+        self._fps_label.setText(f"{fps:.0f} FPS")
 
     def set_from_badge(self, text: str) -> None:
         self._from_badge.setText(text)
@@ -417,6 +411,8 @@ class ControlPanel(QWidget):
                           background:#16213E; border-radius:6px; }
             QLabel#badge  { color:#80CBC4; font-size:10px; font-style:italic; }
             QLabel#status { color:#B0BEC5; font-size:11px; font-style:italic; }
+            QLabel#fps    { color:#4FC3F7; font-size:11px; font-weight:bold;
+                            padding-left:8px; }
             QFrame#separator { color:#2A2A4A; max-height:1px; background:#2A2A4A; }
             QComboBox#combo { background:#16213E; color:#E0E0E0;
                               border:1px solid #2A2A6A; border-radius:6px;
@@ -425,6 +421,8 @@ class ControlPanel(QWidget):
             QComboBox#combo::drop-down { border:none; padding-right:8px; }
             QComboBox QAbstractItemView { background:#16213E; color:#E0E0E0;
                 selection-background-color:#1565C0; border:1px solid #2A2A6A; }
+            QCheckBox#overlay_chk { color:#90CAF9; font-size:11px; spacing:6px; }
+            QCheckBox#overlay_chk::indicator { width:14px; height:14px; }
             QPushButton { border-radius:8px; padding:9px 14px;
                           font-size:12px; font-weight:bold; border:none; }
             QPushButton#primary  { background:#4CAF50; color:#FFF; }

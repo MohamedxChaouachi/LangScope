@@ -1,0 +1,113 @@
+"""
+ocr_worker.py — OCR worker thread (8 FPS default).
+
+Reads CaptureManager.latest_frame, applies frame-hash + motion-threshold
+gating so OCR only fires when the screen actually changes, then emits
+raw_segments_ready(list[RawSegment]).
+"""
+from __future__ import annotations
+
+import hashlib
+import logging
+import time
+
+import numpy as np
+from PyQt6.QtCore import QThread, pyqtSignal
+
+from capture_manager import CaptureManager
+from models import RawSegment
+from ocr_providers import BaseOCR, EasyOCRProvider
+
+log = logging.getLogger("langscope.ocr_worker")
+
+OCR_FPS        = 8.0
+OCR_INTERVAL   = 1.0 / OCR_FPS
+MOTION_THRESH  = 1.5   # mean-abs pixel diff below which OCR is skipped
+
+
+def _hash_frame(frame: np.ndarray) -> str:
+    ds = np.ascontiguousarray(frame[::4, ::4])
+    return hashlib.md5(ds.tobytes()).hexdigest()
+
+
+class OCRWorker(QThread):
+    """
+    QThread: polls CaptureManager.latest_frame, runs OCR on changed frames.
+
+    Signals:
+        raw_segments_ready(list[RawSegment])
+    """
+
+    raw_segments_ready = pyqtSignal(object)
+
+    def __init__(self, capture: CaptureManager,
+                 ocr: BaseOCR | None = None, parent=None):
+        super().__init__(parent)
+        self._capture  = capture
+        self._ocr      = ocr or EasyOCRProvider()
+        self._running  = True
+        self._last_hash  = ""
+        self._last_frame: np.ndarray | None = None
+
+        # Exposed metrics
+        self.ocr_ms         = 0.0
+        self.frames_skipped = 0
+        self.ocr_calls      = 0
+
+    # ── Public setters (main thread) ──────────────────────────────────────────
+
+    def set_languages(self, from_code: str, to_code: str) -> None:
+        self._ocr.set_language(from_code)
+        self._last_hash = ""   # force re-OCR
+
+    def stop(self) -> None:
+        self._running = False
+        self.wait()
+
+    # ── Worker loop ───────────────────────────────────────────────────────────
+
+    def run(self) -> None:
+        log.debug("OCRWorker started (%.0f FPS)", OCR_FPS)
+        while self._running:
+            t0    = time.perf_counter()
+            frame = self._capture.latest_frame
+
+            if frame is None:
+                time.sleep(OCR_INTERVAL)
+                continue
+
+            fhash = _hash_frame(frame)
+
+            # Gate 1: identical hash → skip
+            if fhash == self._last_hash:
+                self.frames_skipped += 1
+                self._sleep(t0)
+                continue
+
+            # Gate 2: low pixel motion → skip
+            if self._last_frame is not None and self._last_frame.shape == frame.shape:
+                diff = float(np.mean(
+                    np.abs(frame.astype(np.int16) - self._last_frame.astype(np.int16))
+                ))
+                if diff < MOTION_THRESH:
+                    self.frames_skipped += 1
+                    self._sleep(t0)
+                    continue
+
+            self._last_hash  = fhash
+            self._last_frame = frame.copy()
+
+            try:
+                t_ocr = time.perf_counter()
+                segs  = self._ocr.read(frame)
+                self.ocr_ms     = (time.perf_counter() - t_ocr) * 1000
+                self.ocr_calls += 1
+                log.debug("OCR %.1f ms — %d segs", self.ocr_ms, len(segs))
+                self.raw_segments_ready.emit(segs)
+            except Exception as exc:
+                log.exception("OCR error: %s", exc)
+
+            self._sleep(t0)
+
+    def _sleep(self, t0: float) -> None:
+        time.sleep(max(0.0, OCR_INTERVAL - (time.perf_counter() - t0)))

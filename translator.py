@@ -8,17 +8,28 @@ Package cache:
   NOT under %%LOCALAPPDATA%%.  We pin the path explicitly at import time so
   that get_installed_packages() reliably finds already-downloaded models and
   never triggers a spurious re-download.
+
+Optimizations added (Phase 1):
+  • Translation cache — identical (text, from, to) tuples are never sent to
+    Argos twice.  Cache is bounded to _CACHE_MAX entries and flushed on
+    language-pair change.  Expected gain: eliminates 100% of repeated
+    translation calls on static or slowly-changing screens.
+  • Structured logging — DEBUG-level hits/misses, timing, and errors.
 """
 
 from __future__ import annotations
 
 import logging
 import pathlib
+import time
+import threading
+from typing import Any
 
 # ── Pin argostranslate's data directory BEFORE importing submodules ────────────
 # Without this, get_installed_packages() may return [] even when packages exist
 # because argostranslate.settings resolves the path lazily and inconsistently
 # across import order on Windows.
+# pyrefly: ignore [missing-import]
 import argostranslate.settings as _argo_settings
 
 _DATA_DIR = pathlib.Path(_argo_settings.data_dir)      # e.g. ~/.local/share/argos-translate
@@ -37,7 +48,67 @@ import argostranslate.package
 # pyrefly: ignore [missing-import]
 import argostranslate.translate
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("langscope.translator")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Translation cache  (Goal 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Maximum number of (text, from_code, to_code) → translated entries to keep.
+# Older entries are evicted in FIFO order when the limit is reached.
+_CACHE_MAX = 512
+
+# The cache itself: key = (text, from_code, to_code), value = translated str.
+_translation_cache: dict[tuple[str, str, str], str] = {}
+
+# Insertion-order list used for O(1) FIFO eviction.
+_cache_order:  list[tuple[str, str, str]] = []
+
+# Thread-safe access — translate_text may be called from the capture thread
+# while clear_translation_cache is called from the main thread.
+_cache_lock = threading.Lock()
+
+# Lifetime counters for debugging / metrics.
+_cache_hits:   int = 0
+_cache_misses: int = 0
+
+
+def _cache_put(key: tuple[str, str, str], value: str) -> None:
+    """Insert *key→value* into the cache, evicting the oldest entry if full.
+    Must be called while holding *_cache_lock*."""
+    global _translation_cache, _cache_order
+    if len(_translation_cache) >= _CACHE_MAX:
+        oldest = _cache_order.pop(0)
+        _translation_cache.pop(oldest, None)
+    _translation_cache[key] = value
+    _cache_order.append(key)
+
+
+def clear_translation_cache() -> None:
+    """Flush the entire translation cache.
+
+    Should be called whenever the source or target language changes so that
+    cached translations for the old pair are not accidentally reused.
+    """
+    global _translation_cache, _cache_order, _cache_hits, _cache_misses
+    with _cache_lock:
+        _translation_cache.clear()
+        _cache_order.clear()
+        _cache_hits   = 0
+        _cache_misses = 0
+    log.debug("[Translator] Translation cache cleared.")
+
+
+def get_cache_stats() -> dict[str, Any]:
+    """Return a snapshot of translation-cache statistics for debugging/metrics."""
+    with _cache_lock:
+        return {
+            "size":   len(_translation_cache),
+            "hits":   _cache_hits,
+            "misses": _cache_misses,
+            "max":    _CACHE_MAX,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,7 +197,7 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Translation
+# Translation  (with cache, Goal 1)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def translate_text(text: str, from_code: str, to_code: str) -> str:
@@ -134,21 +205,47 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
     Translate *text* from *from_code* to *to_code* using the locally cached
     Argos Translate model.
 
+    Cache behaviour:
+      • On a cache HIT  the translated string is returned instantly (no Argos
+        call, no CPU/GPU cost).
+      • On a cache MISS the result is translated, stored, and returned.
+
     Uses the explicit installed-languages API instead of the convenience
     wrapper, which can silently return None when duplicate package entries
     are present in get_installed_languages().
 
     Returns the translated string, or the original *text* on failure.
     """
+    global _cache_hits, _cache_misses
+
     if not text.strip():
         return text
 
     if from_code == to_code:
         return text  # nothing to translate
 
+    cache_key = (text, from_code, to_code)
+
+    # ── Cache lookup ───────────────────────────────────────────────────────
+    with _cache_lock:
+        if cache_key in _translation_cache:
+            _cache_hits += 1
+            log.debug(
+                "[Translator] CACHE HIT  (%s→%s) hits=%d misses=%d  %r",
+                from_code, to_code, _cache_hits, _cache_misses, text[:40],
+            )
+            return _translation_cache[cache_key]
+        _cache_misses += 1
+
+    log.debug(
+        "[Translator] CACHE MISS (%s→%s) hits=%d misses=%d  %r",
+        from_code, to_code, _cache_hits, _cache_misses, text[:40],
+    )
     print(f"[Translator] Translating ({from_code}->{to_code}): {text[:50]!r}")
+
+    # ── Argos Translate call ───────────────────────────────────────────────
+    t0 = time.perf_counter()
     try:
-        # ── Use explicit language lookup (more robust than the wrapper) ────
         installed = argostranslate.translate.get_installed_languages()
 
         # De-duplicate: keep first occurrence of each language code
@@ -173,8 +270,21 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
             return text
 
         result = translation.translate(text)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+
+        log.debug(
+            "[Translator] translate_text done in %.1f ms (%s→%s)",
+            elapsed_ms, from_code, to_code,
+        )
         print(f"[Translator] OK Result: {result[:50]!r}")
-        return result.strip() if result and result.strip() else text
+
+        final = result.strip() if result and result.strip() else text
+
+        # ── Store in cache ─────────────────────────────────────────────────
+        with _cache_lock:
+            _cache_put(cache_key, final)
+
+        return final
 
     except Exception as exc:
         print(f"[Translator] ERR Exception ({from_code}->{to_code}): {exc}")

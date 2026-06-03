@@ -1,41 +1,33 @@
 """
 main.py — Application Entry Point
 
-Architecture:
-  CaptureWorker (QThread)
-    ├── EasyOCR       — text detection
-    ├── ArgosTranslate — offline translation
-    └── text_ready(raw, translated) ──► main thread ──► UI update
+New threading model:
+  CaptureManager (daemon thread)   — 60 FPS screen grab, writes latest_frame
+  OCRWorker      (QThread)         — 8  FPS, reads latest_frame, emits raw_segments_ready
+  TranslationWorker (QThread)      — on-demand, translates new/changed text
+  QTimer @ 60 FPS                  — reads latest_frame + latest_regions → UI
 
-  PackageSetupThread (QThread)
-    └── Triggered immediately when the user changes the language pair.
+  PackageSetupThread (QThread)     — one-shot Argos pack downloader (unchanged)
 """
 
 import sys
 
-# pyrefly: ignore [missing-import]
-from PyQt6.QtCore import QThread, pyqtSignal, QObject
-# pyrefly: ignore [missing-import]
+from PyQt6.QtCore    import QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication
 
-from ui import ControlPanel
-from engine import CaptureWorker
 import translator
+from ui                   import ControlPanel
+from capture_manager      import CaptureManager
+from ocr_worker           import OCRWorker
+from translation_worker   import TranslationWorker
+from overlay_window       import OverlayWindow
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PackageSetupThread
-# Runs translator.setup_translation_models() in the background whenever the
-# user picks a new language pair — keeps the UI responsive during download.
+# PackageSetupThread  (unchanged from original)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PackageSetupThread(QThread):
-    """
-    One-shot thread: installs an Argos language pack, then emits `finished`.
-    Instantiate a new one for each download request (QThreads are not reusable).
-    """
-
-    # (from_code, to_code, success)
     setup_finished = pyqtSignal(str, str, bool)
 
     def __init__(self, from_code: str, to_code: str, parent=None):
@@ -55,26 +47,57 @@ class PackageSetupThread(QThread):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
+    # ── UI ────────────────────────────────────────────────────────────────────
     panel   = ControlPanel()
     panel.show()
 
-    capture_worker = CaptureWorker()
+    overlay = OverlayWindow()
 
-    # Active setup threads — keep references so Qt doesn't garbage-collect them
+    # ── Pipeline workers ──────────────────────────────────────────────────────
+    capture_mgr  = CaptureManager()
+    ocr_worker   = OCRWorker(capture_mgr)
+    tx_worker    = TranslationWorker()
+
+    # OCR → TranslationWorker (cross-thread, via queue)
+    ocr_worker.raw_segments_ready.connect(tx_worker.enqueue)
+
+    # ── Render timer (60 FPS) ─────────────────────────────────────────────────
+    _capture_region: dict = {"top": 100, "left": 100, "width": 500, "height": 200}
+    _fps_counter    = {"frames": 0, "t0": 0.0}
+
+    def _render_tick() -> None:
+        frame = capture_mgr.latest_frame
+        if frame is None:
+            return
+        h, w  = frame.shape[:2]
+        regs  = tx_worker.latest_regions
+
+        # Convert TranslationRegion list → legacy (bbox, orig, trans) tuples
+        # so LiveFeedWidget.update_frame() needs no change.
+        detections = [(r.bbox, r.original_text, r.translated_text) for r in regs]
+        panel.update_live_feed(frame, detections, w, h)
+
+        # Update overlay if active
+        overlay.update_regions(regs, _capture_region)
+
+        # FPS counter
+        import time
+        _fps_counter["frames"] += 1
+        now = time.perf_counter()
+        if now - _fps_counter["t0"] >= 1.0:
+            fps = _fps_counter["frames"] / (now - _fps_counter["t0"])
+            panel.set_fps(fps)
+            _fps_counter["frames"] = 0
+            _fps_counter["t0"]     = now
+
+    render_timer = QTimer()
+    render_timer.setInterval(16)   # ~60 FPS
+    render_timer.timeout.connect(_render_tick)
+
+    # ── Package setup helpers (unchanged logic) ───────────────────────────────
     _setup_threads: list[PackageSetupThread] = []
 
-    # ── Package setup logic ───────────────────────────────────────────────────
-
-    def _update_badge(from_code: str, to_code: str, installed: bool) -> None:
-        """Refresh the FROM/TO badges to show cache status."""
-        icon = "✅ Cached" if installed else "⬇ Missing"
-        # FROM badge: check whether any from_code→X pack exists
-        from_ok = translator.is_package_installed(from_code, to_code)
-        panel.set_from_badge("✅ Ready" if from_ok or from_code == to_code else "⬇ Pack needed")
-        panel.set_to_badge("✅ Ready"   if from_ok or from_code == to_code else "")
-
     def _on_setup_finished(from_code: str, to_code: str, success: bool) -> None:
-        """Called on the main thread when a PackageSetupThread completes."""
         if success:
             panel.set_status(f"✅ {from_code}→{to_code} ready")
             panel.set_from_badge("✅ Cached")
@@ -85,82 +108,83 @@ if __name__ == "__main__":
             panel.set_to_badge("❌ Failed")
 
     def trigger_package_setup(from_code: str, to_code: str) -> None:
-        """
-        Start a background PackageSetupThread for *from_code* → *to_code*.
-        Skips if already cached or if it's a same-language pair.
-        """
         if from_code == to_code:
             panel.set_from_badge("(same lang)")
             panel.set_to_badge("")
             return
-
         if translator.is_package_installed(from_code, to_code):
             panel.set_status(f"✅ {from_code}→{to_code} already cached")
             panel.set_from_badge("✅ Cached")
             panel.set_to_badge("✅ Cached")
             return
-
         panel.set_status(f"⬇ Downloading {from_code}→{to_code} pack…")
         panel.set_from_badge("⬇ Downloading…")
         panel.set_to_badge("⬇ Downloading…")
-
         t = PackageSetupThread(from_code, to_code)
         t.setup_finished.connect(_on_setup_finished)
         t.start()
-        _setup_threads.append(t)   # keep alive
+        _setup_threads.append(t)
 
-    # ── Language pair changed ──────────────────────────────────────────────────
+    # ── Language pair changed ─────────────────────────────────────────────────
 
     def on_language_pair_changed(from_code: str, to_code: str) -> None:
-        """Called when either combo changes in the UI."""
-        capture_worker.set_languages(from_code, to_code)
+        ocr_worker.set_languages(from_code, to_code)
+        tx_worker.set_languages(from_code, to_code)
         trigger_package_setup(from_code, to_code)
 
     panel.language_pair_changed.connect(on_language_pair_changed)
 
-    # ── Seed defaults ──────────────────────────────────────────────────────────
-    # Apply the panel's initial selections to the worker, and trigger a download
-    # for English→French (the default pair) so it's ready immediately.
+    # ── Seed defaults ─────────────────────────────────────────────────────────
     _init_from = panel.selected_from_language()
     _init_to   = panel.selected_to_language()
-    capture_worker.set_languages(_init_from, _init_to)
-    trigger_package_setup(_init_from, _init_to)   # en→fr on first launch
+    ocr_worker.set_languages(_init_from, _init_to)
+    tx_worker.set_languages(_init_from, _init_to)
+    trigger_package_setup(_init_from, _init_to)
 
-    # ── Region selector ────────────────────────────────────────────────────────
+    # ── Region selector ───────────────────────────────────────────────────────
 
     def on_region_changed(top: int, left: int, w: int, h: int) -> None:
-        capture_worker.set_region(top, left, w, h)
+        global _capture_region
+        _capture_region = {"top": top, "left": left, "width": w, "height": h}
+        capture_mgr.set_region(_capture_region)
 
     panel.region_changed.connect(on_region_changed)
 
-    # ── frame_ready -> UI ──────────────────────────────────────────────────────
-    def on_frame_ready(frame, detections: list, orig_w: int, orig_h: int) -> None:
-        """Runs on main thread — pass frame + per-region translations to feed."""
-        panel.update_live_feed(frame, detections, orig_w, orig_h)
-        if any(t for _, _, t in detections):
-            panel.set_status("OK Translated")
+    # ── Overlay toggle ────────────────────────────────────────────────────────
 
-    capture_worker.frame_ready.connect(on_frame_ready)
+    def on_overlay_toggled(active: bool) -> None:
+        overlay.set_active(active)
+
+    panel.overlay_toggled.connect(on_overlay_toggled)
 
     # ── Start / Stop ──────────────────────────────────────────────────────────
 
     def on_start() -> None:
-        capture_worker._running = True
-        if not capture_worker.isRunning():
-            capture_worker.start()
+        capture_mgr.start(_capture_region)
+        if not ocr_worker.isRunning():
+            ocr_worker.start()
+        if not tx_worker.isRunning():
+            tx_worker.start()
+        render_timer.start()
         panel.set_status("⏳ Loading OCR & translation models…")
 
     def on_stop() -> None:
-        capture_worker._running = False
+        render_timer.stop()
+        capture_mgr.stop()
+        ocr_worker.stop()
+        tx_worker.stop()
         panel.set_status("⏹ Stopped")
 
     panel.start_requested.connect(on_start)
     panel.stop_requested.connect(on_stop)
 
-    # ── Clean shutdown ─────────────────────────────────────────────────────────
+    # ── Clean shutdown ────────────────────────────────────────────────────────
 
     def cleanup() -> None:
-        capture_worker.stop()
+        render_timer.stop()
+        capture_mgr.stop()
+        ocr_worker.stop()
+        tx_worker.stop()
         for t in _setup_threads:
             t.quit()
             t.wait()
