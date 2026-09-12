@@ -2,19 +2,39 @@
 translation_worker.py — Translation worker thread.
 
 Receives list[RawSegment] from OCRWorker via an internal queue.
-Deduplicates by text-MD5 so unchanged segments are never retranslated.
-Applies the same language / numeric / timestamp filters from the old engine.py.
-Maintains `latest_regions` (read by render timer without blocking).
-Emits regions_ready(list[TranslationRegion]) after each cycle.
+
+New in this version:
+  • Region tracking  — TranslationRegions persist across OCR cycles.
+                       New detections are matched to existing regions by
+                       bbox IoU + text similarity before creating new ones.
+  • Bbox smoothing   — EMA applied on each cycle a region is seen.
+  • TTL persistence  — regions stay alive for REGION_TTL seconds after
+                       they stop being detected. miss_count tracks gaps.
+  • Deduplication    — text-hash cache avoids re-translating identical text.
+  • Filters          — numeric, timestamp, same-language guards (unchanged).
+
+Region matching algorithm:
+  For each new RawSegment:
+    1. Find all live regions whose smoothed_bbox has IoU ≥ IOU_THRESHOLD with
+       the segment's bbox.
+    2. Among those candidates, pick the one with the highest text-similarity
+       (difflib SequenceMatcher ratio).
+    3. If best match ≥ TEXT_SIM_THRESHOLD → update that region in-place.
+    4. Otherwise → create a new region.
+  Unmatched live regions are not destroyed immediately; miss_count is
+  incremented. Regions reaching MAX_MISSES are removed.
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import logging
 import queue
 import re
 import time
+from typing import Optional
 
+import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from models import RawSegment, TranslationRegion
@@ -22,7 +42,14 @@ from translation_providers import BaseTranslator, ArgosTranslator
 
 log = logging.getLogger("langscope.translation_worker")
 
-REGION_TTL  = 8.0   # seconds — expired regions are pruned
+# ── Tuning constants ──────────────────────────────────────────────────────────
+REGION_TTL      = 8.0    # seconds before a missed region is pruned
+MAX_MISSES      = 5      # consecutive OCR cycles before pruning
+IOU_THRESHOLD   = 0.30   # minimum bbox overlap to consider a match
+TEXT_SIM_THRESHOLD = 0.55  # minimum text similarity to accept a match
+EMA_ALPHA       = 0.35   # bbox smoothing strength (0=frozen, 1=no smoothing)
+
+# ── Text filters ──────────────────────────────────────────────────────────────
 _MIN_ALPHA  = 3
 _MIN_DETECT = 8
 
@@ -59,11 +86,43 @@ def _thash(text: str) -> str:
     return hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest()
 
 
+# ── Geometry helpers ──────────────────────────────────────────────────────────
+
+def _bbox_rect(bbox: list) -> tuple[float, float, float, float]:
+    """Return (x1, y1, x2, y2) from a 4-point bbox."""
+    pts = np.array(bbox, dtype=float)
+    return pts[:, 0].min(), pts[:, 1].min(), pts[:, 0].max(), pts[:, 1].max()
+
+
+def _iou(bbox_a: list, bbox_b: list) -> float:
+    """Intersection-over-Union of two 4-point bboxes."""
+    ax1, ay1, ax2, ay2 = _bbox_rect(bbox_a)
+    bx1, by1, bx2, by2 = _bbox_rect(bbox_b)
+
+    ix1 = max(ax1, bx1); iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2); iy2 = min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter == 0:
+        return 0.0
+    area_a = max(1e-6, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(1e-6, (bx2 - bx1) * (by2 - by1))
+    return inter / (area_a + area_b - inter)
+
+
+def _text_sim(a: str, b: str) -> float:
+    """SequenceMatcher ratio (0–1)."""
+    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TranslationWorker
+# ─────────────────────────────────────────────────────────────────────────────
+
 class TranslationWorker(QThread):
     """
-    QThread: deduplicates and translates OCR segments.
+    QThread: matches, deduplicates, and translates OCR segments.
 
-    Input:  enqueue(list[RawSegment])  — called from OCRWorker's signal.
+    Input:  enqueue(list[RawSegment])   — called from OCRWorker's signal.
     Output: regions_ready(list[TranslationRegion])
     """
 
@@ -71,14 +130,19 @@ class TranslationWorker(QThread):
 
     def __init__(self, translator: BaseTranslator | None = None, parent=None):
         super().__init__(parent)
-        self._translator: BaseTranslator        = translator or ArgosTranslator()
-        self._from_code   = "en"
-        self._to_code     = "fr"
-        self._running     = True
-        self._queue: queue.Queue                = queue.Queue(maxsize=2)
-        # text-hash → TranslationRegion (dedup cache)
-        self._cache: dict[str, TranslationRegion] = {}
-        # latest complete set — read by render timer
+        self._translator: BaseTranslator = translator or ArgosTranslator()
+        self._from_code = "en"
+        self._to_code   = "fr"
+        self._running   = True
+        self._queue: queue.Queue = queue.Queue(maxsize=2)
+
+        # Active tracked regions — keyed by region_id
+        self._regions: dict[str, TranslationRegion] = {}
+
+        # text-hash → translated string cache
+        self._tx_cache: dict[str, str] = {}
+
+        # latest complete list — read by render timer (atomic assignment)
         self.latest_regions: list[TranslationRegion] = []
 
         self.translate_ms  = 0.0
@@ -90,7 +154,8 @@ class TranslationWorker(QThread):
     def set_languages(self, from_code: str, to_code: str) -> None:
         self._from_code = from_code
         self._to_code   = to_code
-        self._cache.clear()
+        self._regions.clear()
+        self._tx_cache.clear()
         self.latest_regions = []
         self._translator.clear_cache()
 
@@ -109,7 +174,7 @@ class TranslationWorker(QThread):
     def stop(self) -> None:
         self._running = False
         try:
-            self._queue.put_nowait(None)   # unblock .get()
+            self._queue.put_nowait(None)
         except queue.Full:
             pass
         self.wait()
@@ -128,80 +193,154 @@ class TranslationWorker(QThread):
             if item is None or not self._running:
                 break
 
-            regions = self._process(item)
-            self.latest_regions = regions
-            self.regions_ready.emit(regions)
+            self._update(item)
+            live = [r for r in self._regions.values() if r.miss_count == 0
+                    or r.miss_count <= MAX_MISSES]
+            self.latest_regions = live
+            self.regions_ready.emit(live)
 
-    # ── Processing ────────────────────────────────────────────────────────────
+    # ── Region update ─────────────────────────────────────────────────────────
 
-    def _process(self, segments: list[RawSegment]) -> list[TranslationRegion]:
-        same    = self._from_code == self._to_code
-        fc, tc  = self._from_code, self._to_code
-        now     = time.monotonic()
-        results: list[TranslationRegion] = []
-        to_tx:  list[tuple[int, RawSegment]] = []
+    def _update(self, segments: list[RawSegment]) -> None:
+        """
+        Match each segment to an existing region or create a new one.
+        Increment miss_count for unmatched live regions.
+        """
+        now      = time.monotonic()
+        same     = self._from_code == self._to_code
+        fc, tc   = self._from_code, self._to_code
 
-        # First pass: cache / filter
-        for i, seg in enumerate(segments):
-            if same or _numeric(seg.text) or _already_target(seg.text, tc):
-                results.append(TranslationRegion(
-                    bbox=seg.bbox, original_text=seg.text,
-                    translated_text=seg.text, timestamp=now,
-                ))
-                continue
+        # Track which existing regions were matched this cycle
+        matched_ids: set[str] = set()
 
-            h = _thash(seg.text)
-            if h in self._cache:
-                cached = self._cache[h]
-                results.append(TranslationRegion(
+        # Collect segments that need translation (cache misses)
+        to_translate: list[tuple[str, RawSegment, Optional[TranslationRegion]]] = []
+
+        for seg in segments:
+            # Find best matching existing region
+            existing = self._find_match(seg)
+
+            if existing is not None:
+                matched_ids.add(existing.region_id)
+                existing.apply_smoothing(seg.bbox, EMA_ALPHA)
+                existing.confidence  = seg.score
+                existing.last_seen   = now
+                existing.miss_count  = 0
+
+                # Text changed? Mark for re-translation
+                if seg.text != existing.original_text:
+                    existing.original_text   = seg.text
+                    existing.translated_text = seg.text  # interim passthrough
+                    if not same and not _numeric(seg.text) and not _already_target(seg.text, tc):
+                        to_translate.append((_thash(seg.text), seg, existing))
+            else:
+                # New region — create, schedule translation
+                reg = TranslationRegion(
                     bbox=seg.bbox,
-                    original_text=cached.original_text,
-                    translated_text=cached.translated_text,
-                    timestamp=now,
-                ))
+                    original_text=seg.text,
+                    translated_text=seg.text,   # passthrough until translated
+                    confidence=seg.score,
+                    last_seen=now,
+                )
+                self._regions[reg.region_id] = reg
+
+                if not same and not _numeric(seg.text) and not _already_target(seg.text, tc):
+                    to_translate.append((_thash(seg.text), seg, reg))
+                else:
+                    reg.translated_text = seg.text
+
+        # Increment miss_count for unmatched regions
+        for rid, reg in self._regions.items():
+            if rid not in matched_ids:
+                reg.miss_count += 1
+
+        # Batch-translate all cache misses
+        if to_translate:
+            self._batch_translate(to_translate, fc, tc)
+
+    def _find_match(self, seg: RawSegment) -> Optional[TranslationRegion]:
+        """
+        Return the best-matching live region for *seg*, or None.
+
+        Candidates must have IoU ≥ IOU_THRESHOLD with seg.bbox (using their
+        smoothed_bbox for stability). Among candidates, we pick the one with
+        the highest text similarity. Returned only if ≥ TEXT_SIM_THRESHOLD.
+        """
+        best:       Optional[TranslationRegion] = None
+        best_score: float                        = -1.0
+
+        for reg in self._regions.values():
+            if reg.miss_count > MAX_MISSES:
+                continue
+            iou = _iou(reg.smoothed_bbox, seg.bbox)
+            if iou < IOU_THRESHOLD:
+                continue
+            sim   = _text_sim(reg.original_text, seg.text)
+            combined = 0.6 * iou + 0.4 * sim   # weighted score
+            if combined > best_score:
+                best_score = combined
+                best       = reg
+
+        if best is not None and best_score >= (0.6 * IOU_THRESHOLD + 0.4 * TEXT_SIM_THRESHOLD):
+            return best
+        return None
+
+    def _batch_translate(
+        self,
+        items: list[tuple[str, RawSegment, TranslationRegion]],
+        fc: str, tc: str,
+    ) -> None:
+        """Translate all cache-miss texts in one Argos call."""
+        # Deduplicate by hash so identical texts aren't sent twice
+        unique: dict[str, list[TranslationRegion]] = {}
+        for h, seg, reg in items:
+            if h in self._tx_cache:
+                reg.translated_text = self._tx_cache[h]
                 self.cache_hits += 1
             else:
-                results.append(None)   # placeholder
-                to_tx.append((i, seg))
+                unique.setdefault(h, [])
+                unique[h].append(reg)
                 self.cache_misses += 1
 
-        # Second pass: batch-translate misses
-        if to_tx:
-            joined = "\n".join(s.text for _, s in to_tx)
-            t0     = time.perf_counter()
-            try:
-                translated = self._translator.translate(joined, fc, tc)
-            except Exception as exc:
-                log.exception("Translation error: %s", exc)
-                translated = joined
-            self.translate_ms = (time.perf_counter() - t0) * 1000
-            log.debug("Batch translate %.1f ms", self.translate_ms)
+        if not unique:
+            return
 
-            lines = translated.split("\n")
-            for j, (i, seg) in enumerate(to_tx):
-                tx  = lines[j].strip() if j < len(lines) else seg.text
-                reg = TranslationRegion(
-                    bbox=seg.bbox, original_text=seg.text,
-                    translated_text=tx or seg.text, timestamp=now,
-                )
-                results[i] = reg
-                self._cache[_thash(seg.text)] = reg
+        # Gather one representative text per hash
+        hash_order = list(unique.keys())
+        texts_by_hash = {}
+        for h, seg, reg in items:
+            if h in unique and h not in texts_by_hash:
+                texts_by_hash[h] = seg.text
 
-        # Fill any remaining None slots (shouldn't happen, safety net)
-        final = []
-        for i, r in enumerate(results):
-            if r is None:
-                s = segments[i]
-                final.append(TranslationRegion(
-                    bbox=s.bbox, original_text=s.text,
-                    translated_text=s.text, timestamp=now,
-                ))
-            else:
-                final.append(r)
-        return final
+        joined = "\n".join(texts_by_hash[h] for h in hash_order)
+        t0 = time.perf_counter()
+        try:
+            translated = self._translator.translate(joined, fc, tc)
+        except Exception as exc:
+            log.exception("Translation error: %s", exc)
+            translated = joined
+        self.translate_ms = (time.perf_counter() - t0) * 1000
+        log.debug("Batch translate %.1f ms (%d texts)", self.translate_ms, len(hash_order))
+
+        lines = translated.split("\n")
+        for i, h in enumerate(hash_order):
+            tx = lines[i].strip() if i < len(lines) else texts_by_hash[h]
+            if not tx:
+                tx = texts_by_hash[h]
+            self._tx_cache[h] = tx
+            for reg in unique[h]:
+                reg.translated_text = tx
+
+    # ── Prune ─────────────────────────────────────────────────────────────────
 
     def _prune(self) -> None:
+        """Remove regions that have exceeded MAX_MISSES or REGION_TTL."""
         cutoff = time.monotonic() - REGION_TTL
-        self._cache = {k: v for k, v in self._cache.items() if v.timestamp > cutoff}
-        if self.latest_regions:
-            self.latest_regions = [r for r in self.latest_regions if r.timestamp > cutoff]
+        dead = [
+            rid for rid, reg in self._regions.items()
+            if reg.miss_count > MAX_MISSES or reg.last_seen < cutoff
+        ]
+        for rid in dead:
+            del self._regions[rid]
+        if dead:
+            log.debug("Pruned %d expired regions", len(dead))
