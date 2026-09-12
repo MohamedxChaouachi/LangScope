@@ -94,6 +94,21 @@ LangScope/
 
 ---
 
+## Performance
+
+OCR inference (EasyOCR's CRAFT detector + CRNN recognizer), not the
+threading pipeline, is the dominant cost per frame. Run the benchmark
+harness to get real numbers for your machine and capture region:
+
+```bash
+python bench_ocr.py --frames 30
+```
+
+It reports the preprocess/inference split, mean/median/p95 latency, and
+the effective sustained FPS your GPU can actually deliver — useful before
+tuning `OCR_FPS` in `ocr_worker.py` or the preprocessing steps in
+`ocr_providers.PreprocessConfig`.
+
 ## Roadmap
 
 - Real-time live feed translation: instead of periodic screenshots, future versions will capture and translate screen content as a continuous video stream, eliminating the screenshot interval and enabling instant translation as text appears on screen.
