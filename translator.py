@@ -41,7 +41,7 @@ _PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
 _argo_settings.data_dir = _DATA_DIR
 _argo_settings.package_data_dir = str(_PACKAGES_DIR)
 
-print(f"[Translator] Package cache: {_PACKAGES_DIR}")
+log.info(f"[Translator] Package cache: {_PACKAGES_DIR}")
 
 # pyrefly: ignore [missing-import]
 import argostranslate.package
@@ -155,20 +155,20 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
 
     # Same language — nothing to translate, always "ready"
     if from_code == to_code:
-        print(f"[Translator] Same language ({from_code}), skipping setup.")
+        log.info(f"[Translator] Same language ({from_code}), skipping setup.")
         return True
 
     # ── Already cached on disk? ────────────────────────────────────────────
     if is_package_installed(from_code, to_code):
-        print(f"[Translator] ✅ Package {pair} already cached — ready.")
+        log.info(f"[Translator] ✅ Package {pair} already cached — ready.")
         return True
 
     # ── Fetch package index ────────────────────────────────────────────────
-    print(f"[Translator] Fetching Argos Translate package index…")
+    log.info(f"[Translator] Fetching Argos Translate package index…")
     try:
         argostranslate.package.update_package_index()
     except Exception as exc:
-        print(f"[Translator] ⚠  Could not update package index: {exc}")
+        log.warning(f"[Translator] ⚠  Could not update package index: {exc}")
         # Fall through — we may still find the package in a stale index
 
     # ── Locate the package ─────────────────────────────────────────────────
@@ -178,21 +178,21 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
         None,
     )
     if pkg is None:
-        print(
+        log.error(
             f"[Translator] ❌ No package found for {pair}.\n"
             "  Available pairs: https://www.argosopentech.com/argospm/index/"
         )
         return False
 
     # ── Download & install ─────────────────────────────────────────────────
-    print(f"[Translator] ⬇  Downloading {pair} language pack (~100 MB)…")
+    log.info(f"[Translator] ⬇  Downloading {pair} language pack (~100 MB)…")
     try:
         download_path = pkg.download()
         argostranslate.package.install_from_path(download_path)
-        print(f"[Translator] ✅ Package {pair} installed and cached.")
+        log.info(f"[Translator] ✅ Package {pair} installed and cached.")
         return True
     except Exception as exc:
-        print(f"[Translator] ❌ Installation failed for {pair}: {exc}")
+        log.error(f"[Translator] ❌ Installation failed for {pair}: {exc}")
         return False
 
 
@@ -241,7 +241,7 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
         "[Translator] CACHE MISS (%s→%s) hits=%d misses=%d  %r",
         from_code, to_code, _cache_hits, _cache_misses, text[:40],
     )
-    print(f"[Translator] Translating ({from_code}->{to_code}): {text[:50]!r}")
+    log.debug(f"[Translator] Translating ({from_code}->{to_code}): {text[:50]!r}")
 
     # ── Argos Translate call ───────────────────────────────────────────────
     t0 = time.perf_counter()
@@ -260,13 +260,13 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
         to_lang   = next((l for l in unique_langs if l.code == to_code),   None)
 
         if from_lang is None or to_lang is None:
-            print(f"[Translator] ⚠  Language not found — from={from_lang}, to={to_lang}. "
-                  f"Available: {[l.code for l in unique_langs]}")
+            log.warning(f"[Translator] ⚠  Language not found — from={from_lang}, to={to_lang}. "
+                        f"Available: {[l.code for l in unique_langs]}")
             return text
 
         translation = from_lang.get_translation(to_lang)
         if translation is None:
-            print(f"[Translator] ⚠  No translation path for {from_code}->{to_code}")
+            log.warning(f"[Translator] ⚠  No translation path for {from_code}->{to_code}")
             return text
 
         result = translation.translate(text)
@@ -276,7 +276,7 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
             "[Translator] translate_text done in %.1f ms (%s→%s)",
             elapsed_ms, from_code, to_code,
         )
-        print(f"[Translator] OK Result: {result[:50]!r}")
+        log.debug(f"[Translator] OK Result: {result[:50]!r}")
 
         final = result.strip() if result and result.strip() else text
 
@@ -287,5 +287,5 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
         return final
 
     except Exception as exc:
-        print(f"[Translator] ERR Exception ({from_code}->{to_code}): {exc}")
+        log.error(f"[Translator] ERR Exception ({from_code}->{to_code}): {exc}")
         return text

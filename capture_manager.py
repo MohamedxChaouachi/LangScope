@@ -52,7 +52,7 @@ class CaptureManager:
         self._thread: Optional[threading.Thread] = None
         self._dxcam                = _try_dxcam()
         self._backend: str         = "dxcam" if self._dxcam else "mss"
-        print(f"[Capture] Backend: {self._backend}")
+        log.info(f"[Capture] Backend: {self._backend}")
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ class CaptureManager:
         try:
             camera = self._dxcam.create(output_color="BGR")
         except Exception as exc:
-            print(f"[Capture] DXCam init failed ({exc}) — switching to MSS.")
+            log.warning(f"[Capture] DXCam init failed ({exc}) — switching to MSS.")
             log.warning("DXCam init failed: %s", exc)
             self._backend = "mss"
             self._loop_mss()
@@ -108,7 +108,7 @@ class CaptureManager:
                     self.latest_frame = frame
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))
         except Exception as exc:
-            print(f"[Capture] DXCam error ({exc}) — switching to MSS.")
+            log.error(f"[Capture] DXCam error ({exc}) — switching to MSS.")
             log.exception("DXCam error: %s", exc)
             self._backend = "mss"
             self._loop_mss()
