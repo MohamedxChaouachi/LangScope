@@ -35,7 +35,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread
 
 from models import RawSegment, TranslationRegion
 from translation_providers import BaseTranslator, ArgosTranslator
@@ -123,10 +123,8 @@ class TranslationWorker(QThread):
     QThread: matches, deduplicates, and translates OCR segments.
 
     Input:  enqueue(list[RawSegment])   — called from OCRWorker's signal.
-    Output: regions_ready(list[TranslationRegion])
+    Output: latest_regions (polled by the render timer @ 60 FPS)
     """
-
-    regions_ready = pyqtSignal(object)   # list[TranslationRegion]
 
     def __init__(self, translator: BaseTranslator | None = None, parent=None):
         super().__init__(parent)
@@ -196,8 +194,8 @@ class TranslationWorker(QThread):
             self._update(item)
             live = [r for r in self._regions.values() if r.miss_count == 0
                     or r.miss_count <= MAX_MISSES]
+            # Removed unused regions_ready signal: render timer polls latest_regions directly (smaller diff than wiring an event-driven path).
             self.latest_regions = live
-            self.regions_ready.emit(live)
 
     # ── Region update ─────────────────────────────────────────────────────────
 
