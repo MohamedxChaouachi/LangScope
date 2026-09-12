@@ -26,6 +26,8 @@ from PyQt6.QtGui  import (
     QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent,
 )
 
+from render_utils import draw_translated_text
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Language catalogue
 # ─────────────────────────────────────────────────────────────────────────────
@@ -232,64 +234,13 @@ class LiveFeedWidget(QWidget):
             if not translated or translated == original:
                 continue
 
-            # Auto-size font to fit bbox height (cap at 24 pt)
-            font_pt = min(24, max(6, int(bh * 0.72)))
-            font    = QFont("Segoe UI", font_pt, QFont.Weight.Bold)
-            fm      = QFontMetrics(font)
-
-            # Shrink font until text fits horizontally (with 8 px padding)
-            while font_pt > 6:
-                fm = QFontMetrics(font)
-                if fm.horizontalAdvance(translated) <= bw - 8:
-                    break
-                font_pt -= 1
-                font.setPointSize(font_pt)
-
-            fm     = QFontMetrics(font)
-            line_h = fm.height()
-
-            # Estimate number of lines needed for word-wrap
-            words   = translated.split()
-            lines   = []
-            current = ""
-            for word in words:
-                test = (current + " " + word).strip()
-                if fm.horizontalAdvance(test) <= bw - 8:
-                    current = test
-                else:
-                    if current:
-                        lines.append(current)
-                    current = word
-            if current:
-                lines.append(current)
-            if not lines:
-                lines = [translated]
-
-            needed_h = line_h * len(lines) + 4
-            bg_h     = max(bh, needed_h)
-
-            # Clamp background to widget bounds
-            draw_x1 = max(0, x1)
-            draw_y1 = max(0, y1)
-            draw_x2 = min(W, x1 + bw)
-            draw_y2 = min(H, y1 + bg_h)
-            draw_bw = draw_x2 - draw_x1
-            draw_bh = draw_y2 - draw_y1
-
-            if draw_bw <= 0 or draw_bh <= 0:
-                continue
-
-            p.fillRect(draw_x1, draw_y1, draw_bw, draw_bh, QColor(10, 12, 30, 235))
-            p.setFont(font)
-            p.setPen(QColor("#E0F7FA"))
-
-            # Draw each line, vertically centred within the background block
-            top_offset = max(0, (draw_bh - needed_h) // 2)
-            for li, line in enumerate(lines):
-                ty = draw_y1 + top_offset + li * line_h + fm.ascent()
-                if ty > draw_y2:
-                    break
-                p.drawText(draw_x1 + 4, ty, line)
+            # Shared bbox-clamped, word-wrapped, shrink-to-fit renderer.
+            draw_translated_text(
+                p, translated,
+                x1, y1, bw, bh,
+                W, H,
+                max_font_pt=24,
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
