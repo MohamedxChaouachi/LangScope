@@ -1,12 +1,26 @@
 # Live Translator / LangScope — Python dependencies
-# Install with: pip install -r requirements.txt
 #
-# PyTorch (with CUDA) must be pre-installed in your conda environment.
-# The engine uses EasyOCR + GPU acceleration via torch.cuda.
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 1 — Install PyTorch first (it is NOT listed below, because the correct
+#          package depends on whether you want CPU-only or CUDA/GPU support).
+#          Pick ONE of the following and run it before installing the rest.
 #
-# Optional high-performance capture backend (Windows only):
-#   pip install dxcam
-# Falls back to mss automatically if dxcam is unavailable.
+#   CPU-only (no GPU):
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+#   CUDA 12.1 (NVIDIA GPU):
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+#   CUDA 11.8 (older NVIDIA GPU / driver):
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#
+#   (See https://pytorch.org/get-started/locally/ for other CUDA versions.)
+#   The engine uses EasyOCR + optional GPU acceleration via torch.cuda.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 2 — Install the remaining dependencies:
+#     pip install -r requirements.txt
+# ─────────────────────────────────────────────────────────────────────────────
 
 PyQt6>=6.6.0
 mss>=9.0.1
