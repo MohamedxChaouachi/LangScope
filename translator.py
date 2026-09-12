@@ -25,6 +25,8 @@ import time
 import threading
 from typing import Any
 
+log = logging.getLogger("langscope.translator")
+
 # ── Pin argostranslate's data directory BEFORE importing submodules ────────────
 # Without this, get_installed_packages() may return [] even when packages exist
 # because argostranslate.settings resolves the path lazily and inconsistently
@@ -47,8 +49,6 @@ log.info(f"[Translator] Package cache: {_PACKAGES_DIR}")
 import argostranslate.package
 # pyrefly: ignore [missing-import]
 import argostranslate.translate
-
-log = logging.getLogger("langscope.translator")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
