@@ -51,8 +51,17 @@ class OCRWorker(QThread):
 
         # Exposed metrics
         self.ocr_ms         = 0.0
+        self.preprocess_ms  = 0.0   # split out of ocr_ms — see ocr_providers.read()
+        self.inference_ms   = 0.0
         self.frames_skipped = 0
         self.ocr_calls      = 0
+
+        # Rolling average over the last _AVG_WINDOW calls — smooths out
+        # single-frame noise so the number on screen / in logs is actually
+        # usable for a before/after comparison instead of jumping around.
+        self._AVG_WINDOW = 20
+        self._recent_ms: list[float] = []
+        self.avg_ocr_ms = 0.0
 
     # ── Public setters (main thread) ──────────────────────────────────────────
 
@@ -102,7 +111,21 @@ class OCRWorker(QThread):
                 segs  = self._ocr.read(frame)
                 self.ocr_ms     = (time.perf_counter() - t_ocr) * 1000
                 self.ocr_calls += 1
-                log.debug("OCR %.1f ms — %d segs", self.ocr_ms, len(segs))
+
+                # Pull the preprocess/inference split if the provider tracks it
+                self.preprocess_ms = getattr(self._ocr, "preprocess_ms", 0.0)
+                self.inference_ms  = getattr(self._ocr, "inference_ms", 0.0)
+
+                self._recent_ms.append(self.ocr_ms)
+                if len(self._recent_ms) > self._AVG_WINDOW:
+                    self._recent_ms.pop(0)
+                self.avg_ocr_ms = sum(self._recent_ms) / len(self._recent_ms)
+
+                log.debug(
+                    "OCR %.1f ms (prep=%.1f inf=%.1f, avg=%.1f) — %d segs",
+                    self.ocr_ms, self.preprocess_ms, self.inference_ms,
+                    self.avg_ocr_ms, len(segs),
+                )
                 self.raw_segments_ready.emit(segs)
             except Exception as exc:
                 log.exception("OCR error: %s", exc)
