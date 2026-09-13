@@ -271,9 +271,9 @@ class ControlPanel(QWidget):
         super().__init__(parent)
         self._running = False
         self.setWindowTitle("LangScope")
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(720)
         self.setMinimumHeight(420)
-        self.resize(520, 680)
+        self.resize(900, 620)
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
         self._apply_styles()
         self._selector = RegionSelector()
@@ -282,106 +282,117 @@ class ControlPanel(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(9)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(SPACE_SM)
 
-        # Title
-        title_row = QHBoxLayout(); title_row.setSpacing(SPACE_SM)
+        # ── Compact top toolbar ───────────────────────────────────────────────
+        # A single framed toolbar holding two rows so the live feed gets the
+        # rest of the vertical space by default.
+        toolbar = QFrame(); toolbar.setObjectName("toolbar")
+        tb = QVBoxLayout(toolbar)
+        tb.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_MD, SPACE_SM)
+        tb.setSpacing(SPACE_SM)
+
+        # Row 1 — brand + language pickers
+        row1 = QHBoxLayout(); row1.setSpacing(SPACE_MD)
+
         title_icon = QLabel()
         title_icon.setObjectName("title_icon")
         title_icon.setPixmap(
-            qta.icon("fa5s.globe", color=COLOR_ACCENT).pixmap(QSize(22, 22))
+            qta.icon("fa5s.globe", color=COLOR_ACCENT).pixmap(QSize(20, 20))
         )
-        title_row.addWidget(title_icon)
+        row1.addWidget(title_icon)
         title = QLabel("LangScope")
-        title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         title.setObjectName("title")
-        title_row.addWidget(title)
-        title_row.addStretch()
-        root.addLayout(title_row)
+        row1.addWidget(title)
 
-        root.addWidget(self._sep())
+        row1.addSpacing(SPACE_MD)
 
-        # FROM row
-        root.addWidget(self._lbl("FROM language (source):"))
-        from_row = QHBoxLayout(); from_row.setSpacing(8)
+        # FROM picker (label + combo + badge kept together)
+        row1.addWidget(self._lbl("FROM"))
         self._from_combo = self._combo(_DEFAULT_FROM_IDX)
-        from_row.addWidget(self._from_combo, stretch=1)
+        row1.addWidget(self._from_combo, stretch=1)
         self._from_badge = QLabel(""); self._from_badge.setObjectName("badge")
-        self._from_badge.setFixedWidth(90)
-        from_row.addWidget(self._from_badge)
-        root.addLayout(from_row)
+        self._from_badge.setFixedWidth(70)
+        row1.addWidget(self._from_badge)
 
-        # TO row
-        root.addWidget(self._lbl("TO language (target):"))
-        to_row = QHBoxLayout(); to_row.setSpacing(8)
+        # arrow separator between the two pickers
+        arrow = QLabel()
+        arrow.setObjectName("title_icon")
+        arrow.setPixmap(
+            qta.icon("fa5s.arrow-right", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
+        )
+        row1.addWidget(arrow)
+
+        # TO picker
+        row1.addWidget(self._lbl("TO"))
         self._to_combo = self._combo(_DEFAULT_TO_IDX)
-        to_row.addWidget(self._to_combo, stretch=1)
+        row1.addWidget(self._to_combo, stretch=1)
         self._to_badge = QLabel(""); self._to_badge.setObjectName("badge")
-        self._to_badge.setFixedWidth(90)
-        to_row.addWidget(self._to_badge)
-        root.addLayout(to_row)
+        self._to_badge.setFixedWidth(70)
+        row1.addWidget(self._to_badge)
+
+        tb.addLayout(row1)
 
         self._from_combo.currentIndexChanged.connect(self._on_lang_changed)
         self._to_combo.currentIndexChanged.connect(self._on_lang_changed)
 
-        # Region label
-        region_row = QHBoxLayout(); region_row.setSpacing(SPACE_SM)
-        self._region_icon = QLabel()
-        self._region_icon.setObjectName("region_icon")
-        self._region_icon.setPixmap(
-            qta.icon("fa5s.map-marker-alt", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
-        )
-        self._region_icon.setAlignment(Qt.AlignmentFlag.AlignTop)
-        region_row.addWidget(self._region_icon)
-        self._region_label = QLabel("No region selected")
-        self._region_label.setObjectName("info")
-        self._region_label.setWordWrap(True)
-        region_row.addWidget(self._region_label, stretch=1)
-        root.addLayout(region_row)
+        # Row 2 — actions + toggles + region info
+        row2 = QHBoxLayout(); row2.setSpacing(SPACE_MD)
 
-        # Buttons row
-        btn_row = QHBoxLayout(); btn_row.setSpacing(10)
         self._select_btn = QPushButton("  Select Region")
         self._select_btn.setObjectName("secondary")
         self._select_btn.setIcon(qta.icon("fa5s.mouse-pointer", color=COLOR_WHITE))
         self._select_btn.setIconSize(QSize(16, 16))
         self._select_btn.clicked.connect(self._open_selector)
-        btn_row.addWidget(self._select_btn)
+        row2.addWidget(self._select_btn)
+
         self._start_btn = QPushButton("  Start")
         self._start_btn.setObjectName("primary")
         self._start_btn.setIcon(qta.icon("fa5s.play", color=COLOR_WHITE))
         self._start_btn.setIconSize(QSize(16, 16))
         self._start_btn.setEnabled(False)
         self._start_btn.clicked.connect(self._toggle)
-        btn_row.addWidget(self._start_btn)
-        root.addLayout(btn_row)
+        row2.addWidget(self._start_btn)
 
-        # Overlay + Debug toggles
-        toggle_row = QHBoxLayout(); toggle_row.setSpacing(16)
         self._overlay_chk = QCheckBox("  Desktop Overlay")
         self._overlay_chk.setObjectName("overlay_chk")
         self._overlay_chk.setIcon(qta.icon("fa5s.desktop", color=COLOR_ACCENT_SOFT))
         self._overlay_chk.setIconSize(QSize(16, 16))
         self._overlay_chk.toggled.connect(self.overlay_toggled.emit)
-        toggle_row.addWidget(self._overlay_chk)
+        row2.addWidget(self._overlay_chk)
+
         self._debug_chk = QCheckBox("  Debug Mode")
         self._debug_chk.setObjectName("overlay_chk")   # reuse same style
         self._debug_chk.setIcon(qta.icon("fa5s.search", color=COLOR_ACCENT_SOFT))
         self._debug_chk.setIconSize(QSize(16, 16))
         self._debug_chk.toggled.connect(self.debug_toggled.emit)
-        toggle_row.addWidget(self._debug_chk)
-        toggle_row.addStretch()
-        root.addLayout(toggle_row)
+        row2.addWidget(self._debug_chk)
 
-        root.addWidget(self._sep())
+        row2.addStretch()
 
-        # Live feed
-        root.addWidget(self._lbl("📺  Live Feed  +  In-Place Translation"))
+        # Region info (icon + text) kept compact at the trailing edge
+        self._region_icon = QLabel()
+        self._region_icon.setObjectName("region_icon")
+        self._region_icon.setPixmap(
+            qta.icon("fa5s.map-marker-alt", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
+        )
+        row2.addWidget(self._region_icon)
+        self._region_label = QLabel("No region selected")
+        self._region_label.setObjectName("info")
+        self._region_label.setWordWrap(False)
+        row2.addWidget(self._region_label)
+
+        tb.addLayout(row2)
+
+        root.addWidget(toolbar)
+
+        # ── Live feed (gets all remaining vertical space) ─────────────────────
         self._feed = LiveFeedWidget()
         root.addWidget(self._feed, stretch=1)
 
-        # Status bar row: status text + FPS counter
+        # ── Status bar row: status text + FPS counter ────────────────────────
         status_row = QHBoxLayout()
         self._status = QLabel("Ready — select a region to begin")
         self._status.setObjectName("status")
@@ -489,6 +500,8 @@ class ControlPanel(QWidget):
             QLabel#fps    {{ color:{COLOR_ACCENT}; font-size:11px; font-weight:bold;
                             padding-left:{SPACE_MD}px; }}
             QFrame#separator {{ color:{COLOR_SEPARATOR}; max-height:1px; background:{COLOR_SEPARATOR}; }}
+            QFrame#toolbar {{ background:{COLOR_SURFACE}; border:1px solid {COLOR_BORDER};
+                             border-radius:{RADIUS_MD}px; }}
             QComboBox#combo {{ background:{COLOR_SURFACE}; color:{COLOR_TEXT};
                               border:1px solid {COLOR_BORDER}; border-radius:{RADIUS_SM}px;
                               padding:{SPACE_SM}px {SPACE_XL}px; }}
