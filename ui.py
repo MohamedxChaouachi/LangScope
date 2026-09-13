@@ -14,19 +14,31 @@ ControlPanel adds:
 from __future__ import annotations
 
 import numpy as np
+import qtawesome as qta
 
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QApplication, QComboBox, QFrame,
     QSizePolicy, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
+from PyQt6.QtCore import Qt, QRect, QPoint, QSize, pyqtSignal
 from PyQt6.QtGui  import (
     QFont, QFontMetrics, QPainter, QColor, QPen,
-    QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent,
+    QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent, QIcon,
 )
 
 from render_utils import draw_translated_text
+from theme import (
+    COLOR_BG, COLOR_TEXT, COLOR_WHITE,
+    COLOR_ACCENT, COLOR_ACCENT_SOFT, COLOR_SURFACE, COLOR_BADGE,
+    COLOR_STATUS, COLOR_SEPARATOR, COLOR_BORDER,
+    COLOR_PRIMARY, COLOR_PRIMARY_HOVER, COLOR_PRIMARY_PRESSED,
+    COLOR_SECONDARY, COLOR_SECONDARY_HOVER, COLOR_SECONDARY_PRESSED,
+    COLOR_DANGER, COLOR_DANGER_HOVER, COLOR_DANGER_PRESSED,
+    COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
+    SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL, SPACE_XXL,
+    RADIUS_SM, RADIUS_MD,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Language catalogue
@@ -274,10 +286,19 @@ class ControlPanel(QWidget):
         root.setSpacing(9)
 
         # Title
-        title = QLabel("🌐 LangScope")
+        title_row = QHBoxLayout(); title_row.setSpacing(SPACE_SM)
+        title_icon = QLabel()
+        title_icon.setObjectName("title_icon")
+        title_icon.setPixmap(
+            qta.icon("fa5s.globe", color=COLOR_ACCENT).pixmap(QSize(22, 22))
+        )
+        title_row.addWidget(title_icon)
+        title = QLabel("LangScope")
         title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         title.setObjectName("title")
-        root.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        root.addLayout(title_row)
 
         root.addWidget(self._sep())
 
@@ -305,19 +326,32 @@ class ControlPanel(QWidget):
         self._to_combo.currentIndexChanged.connect(self._on_lang_changed)
 
         # Region label
-        self._region_label = QLabel("📍 No region selected")
+        region_row = QHBoxLayout(); region_row.setSpacing(SPACE_SM)
+        self._region_icon = QLabel()
+        self._region_icon.setObjectName("region_icon")
+        self._region_icon.setPixmap(
+            qta.icon("fa5s.map-marker-alt", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
+        )
+        self._region_icon.setAlignment(Qt.AlignmentFlag.AlignTop)
+        region_row.addWidget(self._region_icon)
+        self._region_label = QLabel("No region selected")
         self._region_label.setObjectName("info")
         self._region_label.setWordWrap(True)
-        root.addWidget(self._region_label)
+        region_row.addWidget(self._region_label, stretch=1)
+        root.addLayout(region_row)
 
         # Buttons row
         btn_row = QHBoxLayout(); btn_row.setSpacing(10)
-        self._select_btn = QPushButton("🖱  Select Region")
+        self._select_btn = QPushButton("  Select Region")
         self._select_btn.setObjectName("secondary")
+        self._select_btn.setIcon(qta.icon("fa5s.mouse-pointer", color=COLOR_WHITE))
+        self._select_btn.setIconSize(QSize(16, 16))
         self._select_btn.clicked.connect(self._open_selector)
         btn_row.addWidget(self._select_btn)
-        self._start_btn = QPushButton("▶  Start")
+        self._start_btn = QPushButton("  Start")
         self._start_btn.setObjectName("primary")
+        self._start_btn.setIcon(qta.icon("fa5s.play", color=COLOR_WHITE))
+        self._start_btn.setIconSize(QSize(16, 16))
         self._start_btn.setEnabled(False)
         self._start_btn.clicked.connect(self._toggle)
         btn_row.addWidget(self._start_btn)
@@ -325,12 +359,16 @@ class ControlPanel(QWidget):
 
         # Overlay + Debug toggles
         toggle_row = QHBoxLayout(); toggle_row.setSpacing(16)
-        self._overlay_chk = QCheckBox("🖥  Desktop Overlay")
+        self._overlay_chk = QCheckBox("  Desktop Overlay")
         self._overlay_chk.setObjectName("overlay_chk")
+        self._overlay_chk.setIcon(qta.icon("fa5s.desktop", color=COLOR_ACCENT_SOFT))
+        self._overlay_chk.setIconSize(QSize(16, 16))
         self._overlay_chk.toggled.connect(self.overlay_toggled.emit)
         toggle_row.addWidget(self._overlay_chk)
-        self._debug_chk = QCheckBox("🔍  Debug Mode")
+        self._debug_chk = QCheckBox("  Debug Mode")
         self._debug_chk.setObjectName("overlay_chk")   # reuse same style
+        self._debug_chk.setIcon(qta.icon("fa5s.search", color=COLOR_ACCENT_SOFT))
+        self._debug_chk.setIconSize(QSize(16, 16))
         self._debug_chk.toggled.connect(self.debug_toggled.emit)
         toggle_row.addWidget(self._debug_chk)
         toggle_row.addStretch()
@@ -379,7 +417,7 @@ class ControlPanel(QWidget):
         self._selector.raise_()
 
     def _on_region_selected(self, top: int, left: int, w: int, h: int) -> None:
-        self._region_label.setText(f"📍 ({left}, {top})  —  {w} x {h} px")
+        self._region_label.setText(f"({left}, {top})  —  {w} x {h} px")
         self._start_btn.setEnabled(True)
         self.region_changed.emit(top, left, w, h)
         self.activateWindow(); self.raise_()
@@ -393,14 +431,16 @@ class ControlPanel(QWidget):
     def _toggle(self) -> None:
         if not self._running:
             self._running = True
-            self._start_btn.setText("⏹  Stop")
+            self._start_btn.setText("  Stop")
+            self._start_btn.setIcon(qta.icon("fa5s.stop", color=COLOR_WHITE))
             self._start_btn.setObjectName("danger")
             self._select_btn.setEnabled(False)
             self._apply_styles()
             self.start_requested.emit()
         else:
             self._running = False
-            self._start_btn.setText("▶  Start")
+            self._start_btn.setText("  Start")
+            self._start_btn.setIcon(qta.icon("fa5s.play", color=COLOR_WHITE))
             self._start_btn.setObjectName("primary")
             self._select_btn.setEnabled(True)
             self._apply_styles()
@@ -436,41 +476,41 @@ class ControlPanel(QWidget):
     # ── Styling ───────────────────────────────────────────────────────────────
 
     def _apply_styles(self) -> None:
-        self.setStyleSheet("""
-            QWidget { background:#1A1A2E; color:#E0E0E0;
-                      font-family:'Segoe UI',sans-serif; font-size:12px; }
-            QLabel#title { color:#4FC3F7; font-size:15px; font-weight:bold; }
-            QLabel#section_label { color:#90CAF9; font-size:11px;
-                                   font-weight:bold; letter-spacing:0.5px; }
-            QLabel#info { color:#90CAF9; font-size:11px; padding:5px 8px;
-                          background:#16213E; border-radius:6px; }
-            QLabel#badge  { color:#80CBC4; font-size:10px; font-style:italic; }
-            QLabel#status { color:#B0BEC5; font-size:11px; font-style:italic; }
-            QLabel#fps    { color:#4FC3F7; font-size:11px; font-weight:bold;
-                            padding-left:8px; }
-            QFrame#separator { color:#2A2A4A; max-height:1px; background:#2A2A4A; }
-            QComboBox#combo { background:#16213E; color:#E0E0E0;
-                              border:1px solid #2A2A6A; border-radius:6px;
-                              padding:6px 10px; }
-            QComboBox#combo:hover { border-color:#4FC3F7; }
-            QComboBox#combo::drop-down { border:none; padding-right:8px; }
-            QComboBox QAbstractItemView { background:#16213E; color:#E0E0E0;
-                selection-background-color:#1565C0; border:1px solid #2A2A6A; }
-            QCheckBox#overlay_chk { color:#90CAF9; font-size:11px; spacing:6px; }
-            QCheckBox#overlay_chk::indicator { width:14px; height:14px; }
-            QPushButton { border-radius:8px; padding:9px 14px;
-                          font-size:12px; font-weight:bold; border:none; }
-            QPushButton#primary  { background:#4CAF50; color:#FFF; }
-            QPushButton#primary:hover   { background:#66BB6A; }
-            QPushButton#primary:pressed { background:#388E3C; }
-            QPushButton#primary:disabled { background:#37474F; color:#78909C; }
-            QPushButton#secondary { background:#1565C0; color:#FFF; }
-            QPushButton#secondary:hover   { background:#1976D2; }
-            QPushButton#secondary:pressed { background:#0D47A1; }
-            QPushButton#secondary:disabled { background:#37474F; color:#78909C; }
-            QPushButton#danger  { background:#E53935; color:#FFF; }
-            QPushButton#danger:hover   { background:#EF5350; }
-            QPushButton#danger:pressed { background:#B71C1C; }
+        self.setStyleSheet(f"""
+            QWidget {{ background:{COLOR_BG}; color:{COLOR_TEXT};
+                      font-family:'Segoe UI',sans-serif; font-size:12px; }}
+            QLabel#title {{ color:{COLOR_ACCENT}; font-size:15px; font-weight:bold; }}
+            QLabel#section_label {{ color:{COLOR_ACCENT_SOFT}; font-size:11px;
+                                   font-weight:bold; letter-spacing:0.5px; }}
+            QLabel#info {{ color:{COLOR_ACCENT_SOFT}; font-size:11px; padding:{SPACE_XS}px {SPACE_MD}px;
+                          background:{COLOR_SURFACE}; border-radius:{RADIUS_SM}px; }}
+            QLabel#badge  {{ color:{COLOR_BADGE}; font-size:10px; font-style:italic; }}
+            QLabel#status {{ color:{COLOR_STATUS}; font-size:11px; font-style:italic; }}
+            QLabel#fps    {{ color:{COLOR_ACCENT}; font-size:11px; font-weight:bold;
+                            padding-left:{SPACE_MD}px; }}
+            QFrame#separator {{ color:{COLOR_SEPARATOR}; max-height:1px; background:{COLOR_SEPARATOR}; }}
+            QComboBox#combo {{ background:{COLOR_SURFACE}; color:{COLOR_TEXT};
+                              border:1px solid {COLOR_BORDER}; border-radius:{RADIUS_SM}px;
+                              padding:{SPACE_SM}px {SPACE_XL}px; }}
+            QComboBox#combo:hover {{ border-color:{COLOR_ACCENT}; }}
+            QComboBox#combo::drop-down {{ border:none; padding-right:{SPACE_MD}px; }}
+            QComboBox QAbstractItemView {{ background:{COLOR_SURFACE}; color:{COLOR_TEXT};
+                selection-background-color:{COLOR_SECONDARY}; border:1px solid {COLOR_BORDER}; }}
+            QCheckBox#overlay_chk {{ color:{COLOR_ACCENT_SOFT}; font-size:11px; spacing:{SPACE_SM}px; }}
+            QCheckBox#overlay_chk::indicator {{ width:{SPACE_XXL}px; height:{SPACE_XXL}px; }}
+            QPushButton {{ border-radius:{RADIUS_MD}px; padding:{SPACE_LG}px {SPACE_XXL}px;
+                          font-size:12px; font-weight:bold; border:none; }}
+            QPushButton#primary  {{ background:{COLOR_PRIMARY}; color:{COLOR_WHITE}; }}
+            QPushButton#primary:hover   {{ background:{COLOR_PRIMARY_HOVER}; }}
+            QPushButton#primary:pressed {{ background:{COLOR_PRIMARY_PRESSED}; }}
+            QPushButton#primary:disabled {{ background:{COLOR_DISABLED_BG}; color:{COLOR_DISABLED_TEXT}; }}
+            QPushButton#secondary {{ background:{COLOR_SECONDARY}; color:{COLOR_WHITE}; }}
+            QPushButton#secondary:hover   {{ background:{COLOR_SECONDARY_HOVER}; }}
+            QPushButton#secondary:pressed {{ background:{COLOR_SECONDARY_PRESSED}; }}
+            QPushButton#secondary:disabled {{ background:{COLOR_DISABLED_BG}; color:{COLOR_DISABLED_TEXT}; }}
+            QPushButton#danger  {{ background:{COLOR_DANGER}; color:{COLOR_WHITE}; }}
+            QPushButton#danger:hover   {{ background:{COLOR_DANGER_HOVER}; }}
+            QPushButton#danger:pressed {{ background:{COLOR_DANGER_PRESSED}; }}
         """)
 
     def keyPressEvent(self, e: QKeyEvent) -> None:
