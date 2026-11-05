@@ -72,9 +72,13 @@ if __name__ == "__main__":
         h, w  = frame.shape[:2]
         regs  = tx_worker.latest_regions
 
-        # Convert TranslationRegion list → legacy (bbox, orig, trans) tuples
-        # so LiveFeedWidget.update_frame() needs no change.
-        detections = [(r.bbox, r.original_text, r.translated_text) for r in regs]
+        # Convert TranslationRegion list → 5-tuple for LiveFeedWidget
+        # (bbox=smoothed, original, translated, region_id, confidence)
+        detections = [
+            (r.smoothed_bbox, r.original_text, r.translated_text,
+             r.region_id, r.confidence)
+            for r in regs
+        ]
         panel.update_live_feed(frame, detections, w, h)
 
         # Update overlay if active
@@ -156,6 +160,11 @@ if __name__ == "__main__":
         overlay.set_active(active)
 
     panel.overlay_toggled.connect(on_overlay_toggled)
+
+    def on_debug_toggled(active: bool) -> None:
+        panel.set_debug(active)
+
+    panel.debug_toggled.connect(on_debug_toggled)
 
     # ── Start / Stop ──────────────────────────────────────────────────────────
 

@@ -26,6 +26,18 @@ TARGET_FPS     = 60.0
 FRAME_INTERVAL = 1.0 / TARGET_FPS
 
 
+def _primary_monitor_rect() -> tuple[int, int, int, int]:
+    """(left, top, width, height) of the primary monitor in desktop pixels."""
+    from mss import mss as _mss
+    with _mss() as sct:
+        monitors = sct.monitors[1:] or sct.monitors[:1]
+    for m in monitors:
+        if m.get("is_primary"):
+            return m["left"], m["top"], m["width"], m["height"]
+    m = monitors[0]
+    return m["left"], m["top"], m["width"], m["height"]
+
+
 def _try_dxcam():
     try:
         import dxcam
@@ -60,6 +72,8 @@ class CaptureManager:
         self.set_region(region)
         if self._running:
             return
+        # Don't let OCR / the live feed see the previous region's last frame.
+        self.latest_frame = None
         self._running = True
         self._thread  = threading.Thread(
             target=self._loop, name="CaptureThread", daemon=True
@@ -95,15 +109,34 @@ class CaptureManager:
             self._backend = "mss"
             self._loop_mss()
             return
+        # dxcam.create() with no arguments captures the primary output only,
+        # and grab() regions are relative to that output. The primary monitor
+        # always sits at the desktop origin, so global == local coordinates for
+        # regions inside it. Regions on any other monitor are grabbed with MSS,
+        # which works in global virtual-desktop coordinates.
+        sct = None
         try:
+            from mss import mss as _mss
+            px, py, pw, ph = _primary_monitor_rect()
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:
-                    r = self._region
-                region_tuple = (r["left"], r["top"],
-                                r["left"] + r["width"],
-                                r["top"]  + r["height"])
-                frame = camera.grab(region=region_tuple)
+                    r = dict(self._region)
+                inside_primary = (
+                    r["left"] >= px and r["top"] >= py
+                    and r["left"] + r["width"]  <= px + pw
+                    and r["top"]  + r["height"] <= py + ph
+                )
+                if inside_primary:
+                    frame = camera.grab(region=(
+                        r["left"] - px, r["top"] - py,
+                        r["left"] - px + r["width"],
+                        r["top"]  - py + r["height"],
+                    ))
+                else:
+                    if sct is None:
+                        sct = _mss()
+                    frame = np.array(sct.grab(r))[..., :3]   # BGRA → BGR
                 if frame is not None:
                     self.latest_frame = frame
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))
@@ -113,6 +146,11 @@ class CaptureManager:
             self._backend = "mss"
             self._loop_mss()
         finally:
+            if sct is not None:
+                try:
+                    sct.close()
+                except Exception:
+                    pass
             try:
                 del camera
             except Exception:

@@ -20,6 +20,7 @@ from PyQt6.QtGui   import (QPainter, QColor, QFont, QFontMetrics,
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from models import TranslationRegion
+from screen_utils import native_region_to_logical
 
 
 class OverlayWindow(QWidget):
@@ -41,11 +42,14 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self._regions: list[TranslationRegion] = []
         self._active   = False
+        self._dpr      = 1.0
+        self._rect_key: tuple | None = None
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def set_active(self, active: bool) -> None:
         self._active = active
+        self._rect_key = None      # force re-position on next update
         if active:
             self.show()
             self.raise_()
@@ -60,10 +64,18 @@ class OverlayWindow(QWidget):
         """Reposition window over capture region and update displayed regions."""
         if not self._active:
             return
-        self.setGeometry(
-            capture_rect["left"], capture_rect["top"],
-            capture_rect["width"], capture_rect["height"],
-        )
+        # capture_rect is in native desktop pixels; Qt windows use logical
+        # coordinates on the screen the region lives on.
+        key = (capture_rect["left"], capture_rect["top"],
+               capture_rect["width"], capture_rect["height"])
+        if key != self._rect_key:
+            self._rect_key = key
+            logical, dpr, screen = native_region_to_logical(capture_rect)
+            self._dpr = dpr
+            win = self.windowHandle()
+            if win is not None and screen is not None and win.screen() is not screen:
+                win.setScreen(screen)
+            self.setGeometry(logical)
         self._regions = regions
         self.update()
 
@@ -76,6 +88,10 @@ class OverlayWindow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        # Region bboxes are in native (physical) pixels; the window is in
+        # logical pixels. Scale so a region lines up on HiDPI screens.
+        if self._dpr != 1.0:
+            p.scale(1.0 / self._dpr, 1.0 / self._dpr)
 
         for reg in self._regions:
             if not reg.has_translation:

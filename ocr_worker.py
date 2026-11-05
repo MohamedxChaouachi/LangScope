@@ -22,12 +22,29 @@ log = logging.getLogger("langscope.ocr_worker")
 
 OCR_FPS        = 8.0
 OCR_INTERVAL   = 1.0 / OCR_FPS
-MOTION_THRESH  = 1.5   # mean-abs pixel diff below which OCR is skipped
+PIXEL_DELTA    = 40    # per-pixel intensity change that counts as "changed"
+MIN_CHANGED_PX = 12    # changed pixels (at half resolution) needed to re-run OCR
 
 
 def _hash_frame(frame: np.ndarray) -> str:
     ds = np.ascontiguousarray(frame[::4, ::4])
     return hashlib.md5(ds.tobytes()).hexdigest()
+
+
+def _content_changed(frame: np.ndarray, prev: np.ndarray) -> bool:
+    """
+    True if enough pixels changed noticeably to warrant a new OCR pass.
+
+    Counts changed pixels instead of averaging the difference over the whole
+    frame: replacing one line of text in a large region barely moves the mean
+    (≈0.6 on 1920x1080) but changes thousands of pixels, and a stale
+    translation would otherwise stay on screen. The per-pixel delta ignores
+    compression noise; the pixel minimum ignores a blinking caret.
+    """
+    a = frame[::2, ::2].astype(np.int16)
+    b = prev[::2, ::2].astype(np.int16)
+    changed = np.abs(a - b).max(axis=2) > PIXEL_DELTA
+    return int(np.count_nonzero(changed)) >= MIN_CHANGED_PX
 
 
 class OCRWorker(QThread):
@@ -68,6 +85,13 @@ class OCRWorker(QThread):
 
     def run(self) -> None:
         log.debug("OCRWorker started (%.0f FPS)", OCR_FPS)
+        # stop() leaves _running False; without this reset a restarted thread
+        # would exit immediately and OCR would silently never run again.
+        self._running    = True
+        # Forget the previous region's frame so the first frame after a restart
+        # is always OCR'd, even if the screen content hasn't changed.
+        self._last_hash  = ""
+        self._last_frame = None
         while self._running:
             t0    = time.perf_counter()
             frame = self._capture.latest_frame
@@ -84,12 +108,9 @@ class OCRWorker(QThread):
                 self._sleep(t0)
                 continue
 
-            # Gate 2: low pixel motion → skip
+            # Gate 2: nothing meaningful changed → skip
             if self._last_frame is not None and self._last_frame.shape == frame.shape:
-                diff = float(np.mean(
-                    np.abs(frame.astype(np.int16) - self._last_frame.astype(np.int16))
-                ))
-                if diff < MOTION_THRESH:
+                if not _content_changed(frame, self._last_frame):
                     self.frames_skipped += 1
                     self._sleep(t0)
                     continue
