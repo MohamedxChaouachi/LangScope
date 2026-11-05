@@ -10,13 +10,16 @@ New threading model:
   PackageSetupThread (QThread)     — one-shot Argos pack downloader (unchanged)
 """
 
+import logging
+import os
 import sys
 
 from PyQt6.QtCore    import QThread, pyqtSignal, QTimer
+from PyQt6.QtGui     import QIcon
 from PyQt6.QtWidgets import QApplication
 
 import translator
-from ui                   import ControlPanel
+from ui                   import ControlPanel, APP_ICON_PATH
 from capture_manager      import CaptureManager
 from ocr_worker           import OCRWorker
 from translation_worker   import TranslationWorker
@@ -45,7 +48,22 @@ class PackageSetupThread(QThread):
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # ── Logging ───────────────────────────────────────────────────────────────
+    # Level configurable via LANGSCOPE_LOGLEVEL (e.g. DEBUG, INFO, WARNING).
+    # Defaults to INFO. This makes the logging calls throughout the pipeline
+    # actually produce visible output.
+    _loglevel_name = os.environ.get("LANGSCOPE_LOGLEVEL", "INFO").upper()
+    _loglevel = getattr(logging, _loglevel_name, logging.INFO)
+    logging.basicConfig(
+        level=_loglevel,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
     app = QApplication(sys.argv)
+
+    # App-wide window/taskbar icon (path is script-relative, packaging-safe).
+    if os.path.exists(APP_ICON_PATH):
+        app.setWindowIcon(QIcon(APP_ICON_PATH))
 
     # ── UI ────────────────────────────────────────────────────────────────────
     panel   = ControlPanel()
@@ -93,6 +111,17 @@ if __name__ == "__main__":
             panel.set_fps(fps)
             _fps_counter["frames"] = 0
             _fps_counter["t0"]     = now
+
+            # Debug stats — read straight off the workers, same as FPS above.
+            # ControlPanel only shows the strip while Debug Mode is checked.
+            panel.set_stats(
+                ocr_ms        = ocr_worker.avg_ocr_ms,
+                preprocess_ms = ocr_worker.preprocess_ms,
+                inference_ms  = ocr_worker.inference_ms,
+                translate_ms  = tx_worker.translate_ms,
+                cache_hits    = tx_worker.cache_hits,
+                cache_misses  = tx_worker.cache_misses,
+            )
 
     render_timer = QTimer()
     render_timer.setInterval(16)   # ~60 FPS

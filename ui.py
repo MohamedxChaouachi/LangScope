@@ -13,7 +13,10 @@ ControlPanel adds:
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
+import qtawesome as qta
 
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout,
@@ -121,7 +124,7 @@ class _ScreenSelectorWindow(QWidget):
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
             p.fillRect(r, QColor(0, 0, 0, 255))
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-            p.setPen(QPen(QColor("#4FC3F7"), 2))
+            p.setPen(QPen(QColor(COLOR_ACCENT), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(r)
             p.setPen(QColor("#FFFFFF"))
@@ -131,7 +134,7 @@ class _ScreenSelectorWindow(QWidget):
                        f"{round(r.width() * d)} x {round(r.height() * d)} px")
         else:
             p.setPen(QColor("#FFFFFF"))
-            p.setFont(QFont("Segoe UI", 14))
+            p.setFont(QFont(_UI_FONT, 14))
             p.drawText(
                 self.rect(), Qt.AlignmentFlag.AlignCenter,
                 f"{self._label}\n"
@@ -260,9 +263,9 @@ class LiveFeedWidget(QWidget):
         W, H = self.width(), self.height()
 
         if self._pixmap is None:
-            p.fillRect(0, 0, W, H, QColor("#0A0A1A"))
-            p.setPen(QColor("#3A3A6A"))
-            p.setFont(QFont("Segoe UI", 11))
+            p.fillRect(0, 0, W, H, QColor(COLOR_FEED_BG))
+            p.setPen(QColor(COLOR_FEED_PLACEHOLDER))
+            p.setFont(QFont(_UI_FONT, 12))
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._PLACEHOLDER)
             return
 
@@ -274,7 +277,7 @@ class LiveFeedWidget(QWidget):
         px = (W - scaled.width())  // 2
         py = (H - scaled.height()) // 2
 
-        p.fillRect(0, 0, W, H, QColor("#0A0A1A"))
+        p.fillRect(0, 0, W, H, QColor(COLOR_FEED_BG))
         p.drawPixmap(px, py, scaled)
 
         if not self._detections:
@@ -390,9 +393,11 @@ class ControlPanel(QWidget):
         super().__init__(parent)
         self._running = False
         self.setWindowTitle("LangScope")
-        self.setMinimumWidth(460)
-        self.setMinimumHeight(420)
-        self.resize(520, 680)
+        if os.path.exists(APP_ICON_PATH):
+            self.setWindowIcon(QIcon(APP_ICON_PATH))
+        self.setMinimumWidth(760)
+        self.setMinimumHeight(440)
+        self.resize(940, 640)
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
         self._apply_styles()
         self._selector = RegionSelector()
@@ -401,63 +406,96 @@ class ControlPanel(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(9)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(SPACE_SM)
 
-        # Title
-        title = QLabel("🌐 LangScope")
-        title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        # ── Compact top toolbar ───────────────────────────────────────────────
+        # A single framed toolbar holding two rows so the live feed gets the
+        # rest of the vertical space by default.
+        toolbar = QFrame(); toolbar.setObjectName("toolbar")
+        tb = QVBoxLayout(toolbar)
+        tb.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_MD, SPACE_SM)
+        tb.setSpacing(SPACE_SM)
+
+        # Row 1 — brand + language pickers
+        row1 = QHBoxLayout(); row1.setSpacing(SPACE_MD)
+
+        title_icon = QLabel()
+        title_icon.setObjectName("title_icon")
+        if os.path.exists(APP_ICON_PATH):
+            _logo = QPixmap(APP_ICON_PATH).scaled(
+                QSize(28, 28),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            title_icon.setPixmap(_logo)
+        row1.addWidget(title_icon)
+        title = QLabel("LangScope")
+        title.setFont(QFont(_UI_FONT, FONT_SIZE_TITLE, QFont.Weight.DemiBold))
         title.setObjectName("title")
-        root.addWidget(title)
+        row1.addWidget(title)
 
-        root.addWidget(self._sep())
+        row1.addSpacing(SPACE_MD)
 
-        # FROM row
-        root.addWidget(self._lbl("FROM language (source):"))
-        from_row = QHBoxLayout(); from_row.setSpacing(8)
+        # FROM picker (label + combo + badge kept together)
+        row1.addWidget(self._lbl("FROM"))
         self._from_combo = self._combo(_DEFAULT_FROM_IDX)
-        from_row.addWidget(self._from_combo, stretch=1)
+        row1.addWidget(self._from_combo, stretch=1)
         self._from_badge = QLabel(""); self._from_badge.setObjectName("badge")
-        self._from_badge.setFixedWidth(90)
-        from_row.addWidget(self._from_badge)
-        root.addLayout(from_row)
+        self._from_badge.setFixedWidth(70)
+        row1.addWidget(self._from_badge)
 
-        # TO row
-        root.addWidget(self._lbl("TO language (target):"))
-        to_row = QHBoxLayout(); to_row.setSpacing(8)
+        # arrow separator between the two pickers
+        arrow = QLabel()
+        arrow.setObjectName("title_icon")
+        arrow.setPixmap(
+            qta.icon("fa5s.arrow-right", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
+        )
+        row1.addWidget(arrow)
+
+        # TO picker
+        row1.addWidget(self._lbl("TO"))
         self._to_combo = self._combo(_DEFAULT_TO_IDX)
-        to_row.addWidget(self._to_combo, stretch=1)
+        row1.addWidget(self._to_combo, stretch=1)
         self._to_badge = QLabel(""); self._to_badge.setObjectName("badge")
-        self._to_badge.setFixedWidth(90)
-        to_row.addWidget(self._to_badge)
-        root.addLayout(to_row)
+        self._to_badge.setFixedWidth(70)
+        row1.addWidget(self._to_badge)
+
+        tb.addLayout(row1)
 
         self._from_combo.currentIndexChanged.connect(self._on_lang_changed)
         self._to_combo.currentIndexChanged.connect(self._on_lang_changed)
 
-        # Region label
-        self._region_label = QLabel("📍 No region selected")
-        self._region_label.setObjectName("info")
-        self._region_label.setWordWrap(True)
-        root.addWidget(self._region_label)
+        # Row 2 — actions + toggles + region info
+        row2 = QHBoxLayout(); row2.setSpacing(SPACE_MD)
 
-        # Buttons row
-        btn_row = QHBoxLayout(); btn_row.setSpacing(10)
-        self._select_btn = QPushButton("🖱  Select Region")
+        self._select_btn = QPushButton("  Select Region")
         self._select_btn.setObjectName("secondary")
+        self._select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._select_btn.setIcon(qta.icon("fa5s.mouse-pointer", color=COLOR_SECONDARY_TEXT))
+        self._select_btn.setIconSize(QSize(16, 16))
+        self._select_btn.setMinimumWidth(150)
         self._select_btn.clicked.connect(self._open_selector)
-        btn_row.addWidget(self._select_btn)
-        self._start_btn = QPushButton("▶  Start")
+        row2.addWidget(self._select_btn)
+
+        self._start_btn = QPushButton("  Start")
         self._start_btn.setObjectName("primary")
+        self._start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._start_btn.setIcon(qta.icon("fa5s.play", color=COLOR_WHITE))
+        self._start_btn.setIconSize(QSize(16, 16))
+        self._start_btn.setMinimumWidth(120)
         self._start_btn.setEnabled(False)
         self._start_btn.clicked.connect(self._toggle)
-        btn_row.addWidget(self._start_btn)
-        root.addLayout(btn_row)
+        row2.addWidget(self._start_btn)
 
         # Overlay + Debug toggles
         toggle_row = QHBoxLayout(); toggle_row.setSpacing(16)
         self._overlay_chk = QCheckBox("🖥  Desktop Overlay")
         self._overlay_chk.setObjectName("overlay_chk")
+        self._overlay_chk.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._overlay_chk.setIcon(qta.icon("fa5s.desktop", color=COLOR_ACCENT_SOFT))
+        self._overlay_chk.setIconSize(QSize(16, 16))
+        self._overlay_chk.setMinimumWidth(150)
         self._overlay_chk.toggled.connect(self.overlay_toggled.emit)
         toggle_row.addWidget(self._overlay_chk)
         self._debug_chk = QCheckBox("🔍  Debug Mode")
@@ -467,14 +505,45 @@ class ControlPanel(QWidget):
         toggle_row.addStretch()
         root.addLayout(toggle_row)
 
-        root.addWidget(self._sep())
+        self._debug_chk = QCheckBox("  Debug Mode")
+        self._debug_chk.setObjectName("overlay_chk")   # reuse same style
+        self._debug_chk.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._debug_chk.setIcon(qta.icon("fa5s.search", color=COLOR_ACCENT_SOFT))
+        self._debug_chk.setIconSize(QSize(16, 16))
+        self._debug_chk.setMinimumWidth(130)
+        self._debug_chk.toggled.connect(self.debug_toggled.emit)
+        row2.addWidget(self._debug_chk)
 
-        # Live feed
-        root.addWidget(self._lbl("📺  Live Feed  +  In-Place Translation"))
+        row2.addStretch()
+
+        # Region info (icon + text) kept compact at the trailing edge
+        self._region_icon = QLabel()
+        self._region_icon.setObjectName("region_icon")
+        self._region_icon.setPixmap(
+            qta.icon("fa5s.map-marker-alt", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
+        )
+        row2.addWidget(self._region_icon)
+        self._region_label = QLabel("No region selected")
+        self._region_label.setObjectName("info")
+        self._region_label.setWordWrap(False)
+        row2.addWidget(self._region_label)
+
+        tb.addLayout(row2)
+
+        root.addWidget(toolbar)
+
+        # ── Live feed (gets all remaining vertical space) ─────────────────────
         self._feed = LiveFeedWidget()
         root.addWidget(self._feed, stretch=1)
 
-        # Status bar row: status text + FPS counter
+        # ── Debug stats strip (hidden unless Debug Mode is on) ────────────────
+        self._stats_label = QLabel("")
+        self._stats_label.setObjectName("stats")
+        self._stats_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._stats_label.setVisible(False)
+        root.addWidget(self._stats_label)
+
+        # ── Status bar row: status text + FPS counter ────────────────────────
         status_row = QHBoxLayout()
         self._status = QLabel("Ready — select a region to begin")
         self._status.setObjectName("status")
@@ -527,14 +596,16 @@ class ControlPanel(QWidget):
     def _toggle(self) -> None:
         if not self._running:
             self._running = True
-            self._start_btn.setText("⏹  Stop")
+            self._start_btn.setText("  Stop")
+            self._start_btn.setIcon(qta.icon("fa5s.stop", color=COLOR_WHITE))
             self._start_btn.setObjectName("danger")
             self._select_btn.setEnabled(False)
             self._apply_styles()
             self.start_requested.emit()
         else:
             self._running = False
-            self._start_btn.setText("▶  Start")
+            self._start_btn.setText("  Start")
+            self._start_btn.setIcon(qta.icon("fa5s.play", color=COLOR_WHITE))
             self._start_btn.setObjectName("primary")
             self._select_btn.setEnabled(True)
             self._apply_styles()
@@ -555,6 +626,25 @@ class ControlPanel(QWidget):
     def set_fps(self, fps: float) -> None:
         self._fps_label.setText(f"{fps:.0f} FPS")
 
+    def set_stats(
+        self,
+        ocr_ms:         float,
+        preprocess_ms:  float,
+        inference_ms:   float,
+        translate_ms:   float,
+        cache_hits:     int,
+        cache_misses:   int,
+    ) -> None:
+        """Update the debug stats strip. No-op display unless Debug Mode is on."""
+        total = cache_hits + cache_misses
+        hit_rate = (cache_hits / total * 100.0) if total else 0.0
+        self._stats_label.setText(
+            f"OCR {ocr_ms:.1f} ms  "
+            f"(prep {preprocess_ms:.1f} / inf {inference_ms:.1f})   ·   "
+            f"Translate {translate_ms:.1f} ms   ·   "
+            f"Cache {hit_rate:.0f}%  ({cache_hits}/{total})"
+        )
+
     def set_from_badge(self, text: str) -> None:
         self._from_badge.setText(text)
 
@@ -570,41 +660,85 @@ class ControlPanel(QWidget):
     # ── Styling ───────────────────────────────────────────────────────────────
 
     def _apply_styles(self) -> None:
-        self.setStyleSheet("""
-            QWidget { background:#1A1A2E; color:#E0E0E0;
-                      font-family:'Segoe UI',sans-serif; font-size:12px; }
-            QLabel#title { color:#4FC3F7; font-size:15px; font-weight:bold; }
-            QLabel#section_label { color:#90CAF9; font-size:11px;
-                                   font-weight:bold; letter-spacing:0.5px; }
-            QLabel#info { color:#90CAF9; font-size:11px; padding:5px 8px;
-                          background:#16213E; border-radius:6px; }
-            QLabel#badge  { color:#80CBC4; font-size:10px; font-style:italic; }
-            QLabel#status { color:#B0BEC5; font-size:11px; font-style:italic; }
-            QLabel#fps    { color:#4FC3F7; font-size:11px; font-weight:bold;
-                            padding-left:8px; }
-            QFrame#separator { color:#2A2A4A; max-height:1px; background:#2A2A4A; }
-            QComboBox#combo { background:#16213E; color:#E0E0E0;
-                              border:1px solid #2A2A6A; border-radius:6px;
-                              padding:6px 10px; }
-            QComboBox#combo:hover { border-color:#4FC3F7; }
-            QComboBox#combo::drop-down { border:none; padding-right:8px; }
-            QComboBox QAbstractItemView { background:#16213E; color:#E0E0E0;
-                selection-background-color:#1565C0; border:1px solid #2A2A6A; }
-            QCheckBox#overlay_chk { color:#90CAF9; font-size:11px; spacing:6px; }
-            QCheckBox#overlay_chk::indicator { width:14px; height:14px; }
-            QPushButton { border-radius:8px; padding:9px 14px;
-                          font-size:12px; font-weight:bold; border:none; }
-            QPushButton#primary  { background:#4CAF50; color:#FFF; }
-            QPushButton#primary:hover   { background:#66BB6A; }
-            QPushButton#primary:pressed { background:#388E3C; }
-            QPushButton#primary:disabled { background:#37474F; color:#78909C; }
-            QPushButton#secondary { background:#1565C0; color:#FFF; }
-            QPushButton#secondary:hover   { background:#1976D2; }
-            QPushButton#secondary:pressed { background:#0D47A1; }
-            QPushButton#secondary:disabled { background:#37474F; color:#78909C; }
-            QPushButton#danger  { background:#E53935; color:#FFF; }
-            QPushButton#danger:hover   { background:#EF5350; }
-            QPushButton#danger:pressed { background:#B71C1C; }
+        # White tick drawn inside the checked indicator (if the asset exists).
+        _check_img = (
+            f" image:url('{_CHECK_ICON_URL}');"
+            if os.path.exists(_CHECK_ICON_PATH) else ""
+        )
+        self.setStyleSheet(f"""
+            /* ── Base ─────────────────────────────────────────────────────── */
+            QWidget {{ background:{COLOR_WHITE}; color:{COLOR_TEXT};
+                      font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_BASE}px; }}
+
+            /* ── Typography ───────────────────────────────────────────────── */
+            QLabel#title {{ color:{COLOR_TEXT}; font-size:{FONT_SIZE_TITLE}px;
+                           font-weight:600; }}
+            QLabel#section_label {{ color:{COLOR_ACCENT_SOFT}; font-size:{FONT_SIZE_XS}px;
+                                   font-weight:700; letter-spacing:1.2px; }}
+            QLabel#info {{ color:{COLOR_STATUS}; font-size:{FONT_SIZE_SM}px; font-weight:500; }}
+            QLabel#badge  {{ color:{COLOR_BADGE}; font-size:{FONT_SIZE_XS}px;
+                            font-weight:700; letter-spacing:0.4px; }}
+            QLabel#status {{ color:{COLOR_STATUS}; font-size:{FONT_SIZE_SM}px; font-weight:500; }}
+            QLabel#fps    {{ color:{COLOR_ACCENT}; font-size:{FONT_SIZE_SM}px; font-weight:700;
+                            letter-spacing:0.4px; padding-left:{SPACE_MD}px; }}
+            QLabel#stats  {{ color:{COLOR_STATUS}; font-size:{FONT_SIZE_XS}px; font-weight:500;
+                            font-family:{FONT_FAMILY_MONO}; letter-spacing:0.2px;
+                            padding-top:{SPACE_XS}px; }}
+
+            /* ── Containers ───────────────────────────────────────────────── */
+            QFrame#separator {{ color:{COLOR_SEPARATOR}; max-height:1px; background:{COLOR_SEPARATOR}; }}
+            QFrame#toolbar {{ background:{COLOR_SURFACE}; border:1px solid {COLOR_BORDER};
+                             border-radius:{RADIUS_MD}px; }}
+
+            /* ── Combo boxes ──────────────────────────────────────────────── */
+            QComboBox#combo {{ background:{COLOR_SURFACE}; color:{COLOR_TEXT};
+                              border:1px solid {COLOR_BORDER}; border-radius:{RADIUS_SM}px;
+                              padding:{SPACE_SM}px {SPACE_XL}px; min-height:18px; }}
+            QComboBox#combo:hover {{ border-color:{COLOR_ACCENT}; }}
+            QComboBox#combo:focus {{ border-color:{COLOR_ACCENT}; }}
+            QComboBox#combo::drop-down {{ border:none; width:26px; padding-right:{SPACE_SM}px; }}
+            QComboBox#combo::down-arrow {{ width:10px; height:10px; }}
+            QComboBox QAbstractItemView {{ background:{COLOR_SURFACE}; color:{COLOR_TEXT};
+                outline:none; padding:4px;
+                selection-background-color:{COLOR_SELECTION};
+                selection-color:{COLOR_TEXT};
+                border:1px solid {COLOR_BORDER}; border-radius:{RADIUS_SM}px; }}
+            QComboBox QAbstractItemView::item {{ padding:6px 10px; border-radius:{RADIUS_SM}px; }}
+
+            /* ── Check boxes ──────────────────────────────────────────────── */
+            QCheckBox#overlay_chk {{ color:{COLOR_ACCENT_SOFT}; font-size:{FONT_SIZE_SM}px;
+                                    font-weight:500; spacing:{SPACE_SM}px; }}
+            QCheckBox#overlay_chk::indicator {{ width:18px; height:18px;
+                border:1.5px solid {COLOR_BORDER}; border-radius:5px;
+                background:{COLOR_SURFACE}; }}
+            QCheckBox#overlay_chk::indicator:hover {{ border-color:{COLOR_ACCENT}; }}
+            QCheckBox#overlay_chk::indicator:checked {{
+                background:{COLOR_ACCENT}; border-color:{COLOR_ACCENT};{_check_img} }}
+
+            /* ── Buttons (slight rounding) ────────────────────────────────── */
+            QPushButton {{ border-radius:{RADIUS_MD}px; padding:{SPACE_LG}px {SPACE_XXL}px;
+                          font-size:{FONT_SIZE_LG}px; font-weight:600; border:none; }}
+            QPushButton#primary  {{ background:{COLOR_PRIMARY}; color:{COLOR_WHITE}; }}
+            QPushButton#primary:hover   {{ background:{COLOR_PRIMARY_HOVER}; }}
+            QPushButton#primary:pressed {{ background:{COLOR_PRIMARY_PRESSED}; }}
+            QPushButton#primary:disabled {{ background:{COLOR_DISABLED_BG}; color:{COLOR_DISABLED_TEXT}; }}
+            QPushButton#secondary {{ background:{COLOR_SECONDARY}; color:{COLOR_SECONDARY_TEXT};
+                                    border:1.5px solid {COLOR_BORDER}; }}
+            QPushButton#secondary:hover   {{ background:{COLOR_SECONDARY_HOVER};
+                                            border-color:{COLOR_ACCENT}; }}
+            QPushButton#secondary:pressed {{ background:{COLOR_SECONDARY_PRESSED}; }}
+            QPushButton#secondary:disabled {{ background:{COLOR_DISABLED_BG}; color:{COLOR_DISABLED_TEXT};
+                                             border-color:{COLOR_BORDER}; }}
+            QPushButton#danger  {{ background:{COLOR_DANGER}; color:{COLOR_WHITE}; }}
+            QPushButton#danger:hover   {{ background:{COLOR_DANGER_HOVER}; }}
+            QPushButton#danger:pressed {{ background:{COLOR_DANGER_PRESSED}; }}
+
+            /* ── Scrollbars (slim, light) ─────────────────────────────────── */
+            QScrollBar:vertical {{ background:transparent; width:10px; margin:0; }}
+            QScrollBar::handle:vertical {{ background:{COLOR_BORDER}; border-radius:5px;
+                                          min-height:30px; }}
+            QScrollBar::handle:vertical:hover {{ background:{COLOR_ACCENT_SOFT}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
         """)
 
     def keyPressEvent(self, e: QKeyEvent) -> None:

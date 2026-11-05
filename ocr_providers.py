@@ -33,8 +33,9 @@ log = logging.getLogger("langscope.ocr_providers")
 CONFIDENCE: float = 0.35        # lowered from 0.4 → catches more small text
 
 EASYOCR_LANG_MAP: dict[str, list[str]] = {
-    "en": ["en"], "fr": ["en"], "es": ["en"], "de": ["en"],
-    "it": ["en"], "pt": ["en"], "ro": ["en"],
+    # Latin-script langs pair their native model with "en" (accented chars + ASCII); EasyOCR allows this combo.
+    "en": ["en"], "fr": ["fr", "en"], "es": ["es", "en"], "de": ["de", "en"],
+    "it": ["it", "en"], "pt": ["pt", "en"], "ro": ["ro", "en"],
     "ru": ["ru"], "zh": ["ch_sim"], "ja": ["ja"], "ar": ["ar"],
 }
 
@@ -66,7 +67,7 @@ def _detect_gpu() -> bool:
               else "[OCR] No CUDA GPU — CPU fallback.")
         return ok
     except Exception as exc:
-        print(f"[OCR] GPU probe failed ({exc}) — CPU.")
+        log.warning(f"[OCR] GPU probe failed ({exc}) — CPU.")
         return False
 
 
@@ -225,10 +226,12 @@ class EasyOCRProvider(BaseOCR):
         with self._lock:
             if key in self._cache:
                 return self._cache[key]
-            print(f"[OCR] Loading EasyOCR reader langs={langs} gpu={_USE_GPU}…")
+            log.info(f"[OCR] Loading EasyOCR reader langs={langs} gpu={_USE_GPU} fp16={USE_FP16}…")
             t0 = time.perf_counter()
             r  = easyocr.Reader(list(langs), gpu=_USE_GPU, verbose=False)
-            print(f"[OCR] Reader ready in {(time.perf_counter()-t0)*1000:.0f} ms.")
+            if USE_FP16:
+                self._apply_fp16(r)
+            log.info(f"[OCR] Reader ready in {(time.perf_counter()-t0)*1000:.0f} ms.")
             self._cache[key] = r
             return r
 

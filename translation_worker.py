@@ -143,8 +143,6 @@ class TranslationWorker(QThread):
     Output: regions_ready(list[TranslationRegion])
     """
 
-    regions_ready = pyqtSignal(object)   # list[TranslationRegion]
-
     def __init__(self, translator: BaseTranslator | None = None, parent=None):
         super().__init__(parent)
         self._translator: BaseTranslator = translator or ArgosTranslator()

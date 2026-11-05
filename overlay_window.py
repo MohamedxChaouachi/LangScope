@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from PyQt6.QtCore  import Qt, QRect
-from PyQt6.QtGui   import (QPainter, QColor, QFont, QFontMetrics,
-                            QPaintEvent, QKeyEvent)
+from PyQt6.QtCore  import Qt
+from PyQt6.QtGui   import QPainter, QPaintEvent, QKeyEvent
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from models import TranslationRegion
@@ -93,6 +92,8 @@ class OverlayWindow(QWidget):
         if self._dpr != 1.0:
             p.scale(1.0 / self._dpr, 1.0 / self._dpr)
 
+        W, H = self.width(), self.height()
+
         for reg in self._regions:
             if not reg.has_translation:
                 continue
@@ -105,19 +106,13 @@ class OverlayWindow(QWidget):
             bw   = max(1, x2 - x1)
             bh   = max(1, y2 - y1)
 
-            font_pt = max(6, int(bh * 0.72))
-            font    = QFont("Segoe UI", font_pt, QFont.Weight.Bold)
-            fm      = QFontMetrics(font)
-            text_w  = fm.horizontalAdvance(reg.translated_text)
-            bg_w    = max(bw, text_w + 8)
-
-            p.fillRect(x1, y1, bg_w, bh, QColor(10, 12, 30, 220))
-            p.setFont(font)
-            p.setPen(QColor("#E0F7FA"))
-            p.drawText(
-                QRect(x1 + 4, y1, bg_w - 4, bh),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                reg.translated_text,
+            # Shared bbox-clamped, word-wrapped, shrink-to-fit renderer keeps
+            # the desktop overlay visually consistent with the live feed.
+            draw_translated_text(
+                p, reg.translated_text,
+                x1, y1, bw, bh,
+                W, H,
+                max_font_pt=24,
             )
 
     def keyPressEvent(self, e: QKeyEvent) -> None:
