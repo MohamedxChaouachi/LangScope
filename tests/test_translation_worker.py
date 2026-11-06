@@ -8,6 +8,7 @@ Tests for the pure, Qt-free helpers in translation_worker.py:
 Nothing is mocked: these functions have no external dependencies beyond
 numpy (used internally by _iou) and difflib/re from the stdlib.
 """
+
 import pytest
 
 from translation_worker import _iou, _text_sim, _numeric, _TIMESTAMP_RE
@@ -19,6 +20,7 @@ def _square(x1, y1, x2, y2):
 
 
 # ── _iou ──────────────────────────────────────────────────────────────────────
+
 
 class TestIou:
     def test_identical_boxes(self):
@@ -76,6 +78,7 @@ class TestIou:
 
 # ── _text_sim ──────────────────────────────────────────────────────────────────
 
+
 class TestTextSim:
     def test_identical_text(self):
         assert _text_sim("hello world", "hello world") == pytest.approx(1.0)
@@ -106,6 +109,7 @@ class TestTextSim:
 
 
 # ── _numeric (and the timestamp regex) ─────────────────────────────────────────
+
 
 class TestNumeric:
     def test_empty_string_is_numeric(self):

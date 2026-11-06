@@ -7,6 +7,7 @@ apply_smoothing runs an Exponential Moving Average on each bbox corner:
 
 Nothing is mocked; TranslationRegion has no external dependencies.
 """
+
 import pytest
 
 from models import TranslationRegion

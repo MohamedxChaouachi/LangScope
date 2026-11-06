@@ -24,6 +24,7 @@ Region matching algorithm:
   Unmatched live regions are not destroyed immediately; miss_count is
   incremented. Regions reaching MAX_MISSES are removed.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -43,17 +44,17 @@ from translation_providers import BaseTranslator, ArgosTranslator
 log = logging.getLogger("langscope.translation_worker")
 
 # ── Tuning constants ──────────────────────────────────────────────────────────
-REGION_TTL      = 8.0    # seconds before a missed region is pruned
-MAX_MISSES      = 5      # consecutive OCR cycles a missed region stays *tracked*
-DISPLAY_GRACE_MISSES = 0 # OCR cycles a missed region stays *visible* (0 = clear
-                         # at once; raise to 1-2 to ride out single-frame OCR misses
-                         # at the cost of brief ghost translations)
-IOU_THRESHOLD   = 0.30   # minimum bbox overlap to consider a match
+REGION_TTL = 8.0  # seconds before a missed region is pruned
+MAX_MISSES = 5  # consecutive OCR cycles a missed region stays *tracked*
+DISPLAY_GRACE_MISSES = 0  # OCR cycles a missed region stays *visible* (0 = clear
+# at once; raise to 1-2 to ride out single-frame OCR misses
+# at the cost of brief ghost translations)
+IOU_THRESHOLD = 0.30  # minimum bbox overlap to consider a match
 TEXT_SIM_THRESHOLD = 0.55  # minimum text similarity to accept a match
-EMA_ALPHA       = 0.35   # bbox smoothing strength (0=frozen, 1=no smoothing)
+EMA_ALPHA = 0.35  # bbox smoothing strength (0=frozen, 1=no smoothing)
 
 # ── Text filters ──────────────────────────────────────────────────────────────
-_MIN_ALPHA  = 3
+_MIN_ALPHA = 3
 _MIN_DETECT = 8
 
 _TIMESTAMP_RE = re.compile(
@@ -79,6 +80,7 @@ def _numeric(text: str) -> bool:
 def _detect_is_target(text: str, to_code: str) -> bool:
     try:
         from langdetect import detect
+
         return detect(text) == to_code
     except Exception:
         return False
@@ -100,6 +102,7 @@ def _thash(text: str) -> str:
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
+
 def _bbox_rect(bbox: list) -> tuple[float, float, float, float]:
     """Return (x1, y1, x2, y2) from a 4-point bbox.
 
@@ -115,8 +118,10 @@ def _iou(bbox_a: list, bbox_b: list) -> float:
     ax1, ay1, ax2, ay2 = _bbox_rect(bbox_a)
     bx1, by1, bx2, by2 = _bbox_rect(bbox_b)
 
-    ix1 = max(ax1, bx1); iy1 = max(ay1, by1)
-    ix2 = min(ax2, bx2); iy2 = min(ay2, by2)
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
     inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
     if inter == 0:
         return 0.0
@@ -134,6 +139,7 @@ def _text_sim(a: str, b: str) -> float:
 # TranslationWorker
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TranslationWorker(QThread):
     """
     QThread: matches, deduplicates, and translates OCR segments.
@@ -146,8 +152,8 @@ class TranslationWorker(QThread):
         super().__init__(parent)
         self._translator: BaseTranslator = translator or ArgosTranslator()
         self._from_code = "en"
-        self._to_code   = "fr"
-        self._running   = True
+        self._to_code = "fr"
+        self._running = True
         self._queue: queue.Queue = queue.Queue(maxsize=2)
         self._warmed_pair: tuple[str, str] | None = None
 
@@ -160,15 +166,15 @@ class TranslationWorker(QThread):
         # latest complete list — read by render timer (atomic assignment)
         self.latest_regions: list[TranslationRegion] = []
 
-        self.translate_ms  = 0.0
-        self.cache_hits    = 0
-        self.cache_misses  = 0
+        self.translate_ms = 0.0
+        self.cache_hits = 0
+        self.cache_misses = 0
 
     # ── Public API (main thread) ──────────────────────────────────────────────
 
     def set_languages(self, from_code: str, to_code: str) -> None:
         self._from_code = from_code
-        self._to_code   = to_code
+        self._to_code = to_code
         self._regions.clear()
         self._tx_cache.clear()
         self.latest_regions = []
@@ -220,15 +226,14 @@ class TranslationWorker(QThread):
             if item is None or not self._running:
                 if not self._running:
                     break
-                continue      # stale stop() sentinel from a previous run
+                continue  # stale stop() sentinel from a previous run
 
             self._update(item)
             # Display only what the latest OCR pass actually saw. Regions it
             # missed stay tracked in self._regions (so they re-match instantly
             # if they reappear) but are not drawn: otherwise translations of
             # text that has left the screen linger on top of the new content.
-            live = [r for r in self._regions.values()
-                    if r.miss_count <= DISPLAY_GRACE_MISSES]
+            live = [r for r in self._regions.values() if r.miss_count <= DISPLAY_GRACE_MISSES]
             self.latest_regions = live
 
     def _warm_up_if_needed(self) -> None:
@@ -251,9 +256,9 @@ class TranslationWorker(QThread):
         Match each segment to an existing region or create a new one.
         Increment miss_count for unmatched live regions.
         """
-        now      = time.monotonic()
-        same     = self._from_code == self._to_code
-        fc, tc   = self._from_code, self._to_code
+        now = time.monotonic()
+        same = self._from_code == self._to_code
+        fc, tc = self._from_code, self._to_code
 
         # Track which existing regions were matched this cycle
         matched_ids: set[str] = set()
@@ -270,13 +275,13 @@ class TranslationWorker(QThread):
             if existing is not None:
                 matched_ids.add(existing.region_id)
                 existing.apply_smoothing(seg.bbox, EMA_ALPHA)
-                existing.confidence  = seg.score
-                existing.last_seen   = now
-                existing.miss_count  = 0
+                existing.confidence = seg.score
+                existing.last_seen = now
+                existing.miss_count = 0
 
                 # Text changed? Mark for re-translation
                 if seg.text != existing.original_text:
-                    existing.original_text   = seg.text
+                    existing.original_text = seg.text
                     existing.translated_text = seg.text  # interim passthrough
                     if not same and not _numeric(seg.text) and not _already_target(seg.text, tc):
                         to_translate.append((_thash(seg.text), seg, existing))
@@ -285,12 +290,12 @@ class TranslationWorker(QThread):
                 reg = TranslationRegion(
                     bbox=seg.bbox,
                     original_text=seg.text,
-                    translated_text=seg.text,   # passthrough until translated
+                    translated_text=seg.text,  # passthrough until translated
                     confidence=seg.score,
                     last_seen=now,
                 )
                 self._regions[reg.region_id] = reg
-                matched_ids.add(reg.region_id)   # seen this cycle: not a miss
+                matched_ids.add(reg.region_id)  # seen this cycle: not a miss
 
                 if not same and not _numeric(seg.text) and not _already_target(seg.text, tc):
                     to_translate.append((_thash(seg.text), seg, reg))
@@ -307,7 +312,9 @@ class TranslationWorker(QThread):
             self._batch_translate(to_translate, fc, tc)
 
     def _find_match(
-        self, seg: RawSegment, exclude: Optional[set] = None,
+        self,
+        seg: RawSegment,
+        exclude: Optional[set] = None,
     ) -> Optional[TranslationRegion]:
         """
         Return the best-matching live region for *seg*, or None.
@@ -316,8 +323,8 @@ class TranslationWorker(QThread):
         smoothed_bbox for stability). Among candidates, we pick the one with
         the highest text similarity. Returned only if ≥ TEXT_SIM_THRESHOLD.
         """
-        best:       Optional[TranslationRegion] = None
-        best_score: float                        = -1.0
+        best: Optional[TranslationRegion] = None
+        best_score: float = -1.0
 
         for reg in self._regions.values():
             if reg.miss_count > MAX_MISSES:
@@ -327,11 +334,11 @@ class TranslationWorker(QThread):
             iou = _iou(reg.smoothed_bbox, seg.bbox)
             if iou < IOU_THRESHOLD:
                 continue
-            sim   = _text_sim(reg.original_text, seg.text)
-            combined = 0.6 * iou + 0.4 * sim   # weighted score
+            sim = _text_sim(reg.original_text, seg.text)
+            combined = 0.6 * iou + 0.4 * sim  # weighted score
             if combined > best_score:
                 best_score = combined
-                best       = reg
+                best = reg
 
         if best is not None and best_score >= (0.6 * IOU_THRESHOLD + 0.4 * TEXT_SIM_THRESHOLD):
             return best
@@ -340,7 +347,8 @@ class TranslationWorker(QThread):
     def _batch_translate(
         self,
         items: list[tuple[str, RawSegment, TranslationRegion]],
-        fc: str, tc: str,
+        fc: str,
+        tc: str,
     ) -> None:
         """Translate all cache-miss texts in one Argos call."""
         # Deduplicate by hash so identical texts aren't sent twice
@@ -391,9 +399,9 @@ class TranslationWorker(QThread):
         # was seen in the latest pass is still on screen even if the screen has
         # been static (no OCR cycles) for longer than REGION_TTL.
         dead = [
-            rid for rid, reg in self._regions.items()
-            if reg.miss_count > MAX_MISSES
-            or (reg.miss_count > 0 and reg.last_seen < cutoff)
+            rid
+            for rid, reg in self._regions.items()
+            if reg.miss_count > MAX_MISSES or (reg.miss_count > 0 and reg.last_seen < cutoff)
         ]
         for rid in dead:
             del self._regions[rid]

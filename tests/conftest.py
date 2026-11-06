@@ -4,6 +4,7 @@ Test configuration for LangScope.
 Ensures the project root (the directory containing translation_worker.py and
 models.py) is importable when pytest is run from anywhere.
 """
+
 import os
 import sys
 

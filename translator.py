@@ -36,7 +36,7 @@ log = logging.getLogger("langscope.translator")
 # pyrefly: ignore [missing-import]
 import argostranslate.settings as _argo_settings
 
-_DATA_DIR = pathlib.Path(_argo_settings.data_dir)      # e.g. ~/.local/share/argos-translate
+_DATA_DIR = pathlib.Path(_argo_settings.data_dir)  # e.g. ~/.local/share/argos-translate
 _PACKAGES_DIR = _DATA_DIR / "packages"
 _PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -62,6 +62,7 @@ def _configure_inference_device() -> None:
         return
     try:
         import ctranslate2
+
         if ctranslate2.get_cuda_device_count() > 0:
             _argo_settings.device = "cuda"
             if not os.environ.get("ARGOS_COMPUTE_TYPE"):
@@ -78,8 +79,10 @@ _configure_inference_device()
 
 # pyrefly: ignore [missing-import]
 import argostranslate.package
+
 # pyrefly: ignore [missing-import]
 import argostranslate.translate
+
 # pyrefly: ignore [missing-import]
 import ctranslate2
 
@@ -96,14 +99,14 @@ _CACHE_MAX = 512
 _translation_cache: dict[tuple[str, str, str], str] = {}
 
 # Insertion-order list used for O(1) FIFO eviction.
-_cache_order:  list[tuple[str, str, str]] = []
+_cache_order: list[tuple[str, str, str]] = []
 
 # Thread-safe access — translate_text may be called from the capture thread
 # while clear_translation_cache is called from the main thread.
 _cache_lock = threading.Lock()
 
 # Lifetime counters for debugging / metrics.
-_cache_hits:   int = 0
+_cache_hits: int = 0
 _cache_misses: int = 0
 
 
@@ -128,7 +131,7 @@ def clear_translation_cache() -> None:
     with _cache_lock:
         _translation_cache.clear()
         _cache_order.clear()
-        _cache_hits   = 0
+        _cache_hits = 0
         _cache_misses = 0
     log.debug("[Translator] Translation cache cleared.")
 
@@ -137,10 +140,10 @@ def get_cache_stats() -> dict[str, Any]:
     """Return a snapshot of translation-cache statistics for debugging/metrics."""
     with _cache_lock:
         return {
-            "size":   len(_translation_cache),
-            "hits":   _cache_hits,
+            "size": len(_translation_cache),
+            "hits": _cache_hits,
             "misses": _cache_misses,
-            "max":    _CACHE_MAX,
+            "max": _CACHE_MAX,
         }
 
 
@@ -148,26 +151,22 @@ def get_cache_stats() -> dict[str, Any]:
 # Cache helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def is_package_installed(from_code: str, to_code: str) -> bool:
     """Return True if the *from_code* → *to_code* package is already on disk."""
     installed = argostranslate.package.get_installed_packages()
-    return any(
-        p.from_code == from_code and p.to_code == to_code
-        for p in installed
-    )
+    return any(p.from_code == from_code and p.to_code == to_code for p in installed)
 
 
 def get_installed_pairs() -> list[tuple[str, str]]:
     """Return all (from_code, to_code) pairs that are cached locally."""
-    return [
-        (p.from_code, p.to_code)
-        for p in argostranslate.package.get_installed_packages()
-    ]
+    return [(p.from_code, p.to_code) for p in argostranslate.package.get_installed_packages()]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Setup — call once before the translation loop, or on language change
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def setup_translation_models(from_code: str, to_code: str) -> bool:
     """
@@ -233,6 +232,7 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
 # Translation  (with cache, Goal 1)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def translate_text(text: str, from_code: str, to_code: str) -> str:
     """
     Translate *text* from *from_code* to *to_code* using the locally cached
@@ -265,14 +265,22 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
             _cache_hits += 1
             log.debug(
                 "[Translator] CACHE HIT  (%s→%s) hits=%d misses=%d  %r",
-                from_code, to_code, _cache_hits, _cache_misses, text[:40],
+                from_code,
+                to_code,
+                _cache_hits,
+                _cache_misses,
+                text[:40],
             )
             return _translation_cache[cache_key]
         _cache_misses += 1
 
     log.debug(
         "[Translator] CACHE MISS (%s→%s) hits=%d misses=%d  %r",
-        from_code, to_code, _cache_hits, _cache_misses, text[:40],
+        from_code,
+        to_code,
+        _cache_hits,
+        _cache_misses,
+        text[:40],
     )
     log.debug(f"[Translator] Translating ({from_code}->{to_code}): {text[:50]!r}")
 
@@ -290,11 +298,13 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
                 unique_langs.append(lang)
 
         from_lang = next((l for l in unique_langs if l.code == from_code), None)
-        to_lang   = next((l for l in unique_langs if l.code == to_code),   None)
+        to_lang = next((l for l in unique_langs if l.code == to_code), None)
 
         if from_lang is None or to_lang is None:
-            log.warning(f"[Translator] ⚠  Language not found — from={from_lang}, to={to_lang}. "
-                        f"Available: {[l.code for l in unique_langs]}")
+            log.warning(
+                f"[Translator] ⚠  Language not found — from={from_lang}, to={to_lang}. "
+                f"Available: {[l.code for l in unique_langs]}"
+            )
             return text
 
         translation = from_lang.get_translation(to_lang)
@@ -307,7 +317,9 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
 
         log.debug(
             "[Translator] translate_text done in %.1f ms (%s→%s)",
-            elapsed_ms, from_code, to_code,
+            elapsed_ms,
+            from_code,
+            to_code,
         )
         log.debug(f"[Translator] OK Result: {result[:50]!r}")
 
@@ -346,7 +358,7 @@ def _get_translation(from_code: str, to_code: str):
     """Return Argos' ITranslation for the pair, or None if unavailable."""
     installed = argostranslate.translate.get_installed_languages()
     from_lang = next((l for l in installed if l.code == from_code), None)
-    to_lang   = next((l for l in installed if l.code == to_code),   None)
+    to_lang = next((l for l in installed if l.code == to_code), None)
     if from_lang is None or to_lang is None:
         return None
     return from_lang.get_translation(to_lang)
@@ -430,7 +442,7 @@ def _batch_package(pt, texts: list[str]) -> list[str]:
             k += 1
         value = pkg.tokenizer.decode(tokens)
         if pkg.target_prefix != "" and value.startswith(pkg.target_prefix):
-            value = value[len(pkg.target_prefix):]
+            value = value[len(pkg.target_prefix) :]
         if value.startswith(" "):
             value = value[1:]
         out.append(value.strip() or text)
@@ -445,8 +457,7 @@ def _batch_translation(translation, texts: list[str]) -> list[str]:
         return _batch_package(translation, texts)
     if isinstance(translation, argostranslate.translate.CompositeTranslation):
         # Pivot translation (e.g. ro→en→fr): two batched hops.
-        return _batch_translation(translation.t2,
-                                  _batch_translation(translation.t1, texts))
+        return _batch_translation(translation.t2, _batch_translation(translation.t1, texts))
     if isinstance(translation, argostranslate.translate.IdentityTranslation):
         return list(texts)
     # Unknown wrapper type: slow path, still correct.
@@ -464,7 +475,7 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
     global _cache_hits, _cache_misses
 
     results: list[str | None] = [None] * len(texts)
-    pending: dict[str, list[int]] = {}      # unique text -> indices to fill
+    pending: dict[str, list[int]] = {}  # unique text -> indices to fill
 
     for i, text in enumerate(texts):
         if not text.strip() or from_code == to_code:
@@ -493,8 +504,11 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
             print(f"[Translator] ERR batch failed ({from_code}->{to_code}): {exc}")
             log.exception("Batch translation failed")
             translated = list(unique)
-        log.debug("[Translator] translate_many %d texts in %.1f ms",
-                  len(unique), (time.perf_counter() - t0) * 1000)
+        log.debug(
+            "[Translator] translate_many %d texts in %.1f ms",
+            len(unique),
+            (time.perf_counter() - t0) * 1000,
+        )
 
         with _cache_lock:
             for text, tx in zip(unique, translated):
@@ -516,10 +530,12 @@ def preload_model(from_code: str, to_code: str) -> bool:
     try:
         translation = _get_translation(from_code, to_code)
         if translation is None:
-            return False          # pack not installed (yet)
+            return False  # pack not installed (yet)
         _batch_translation(translation, ["Hello world"])
-        print(f"[Translator] Model {from_code}->{to_code} warmed up in "
-              f"{(time.perf_counter() - t0) * 1000:.0f} ms.")
+        print(
+            f"[Translator] Model {from_code}->{to_code} warmed up in "
+            f"{(time.perf_counter() - t0) * 1000:.0f} ms."
+        )
         return True
     except Exception as exc:
         print(f"[Translator] Warm-up skipped ({exc})")

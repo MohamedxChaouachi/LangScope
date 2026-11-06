@@ -25,6 +25,7 @@ This is also a legitimate CV artifact on its own: it's the kind of
 benchmark harness a hiring manager expects to see next to a performance
 claim like "reduced average OCR latency by X%".
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,9 +52,13 @@ def summarize(label: str, samples_ms: list[float]) -> None:
     if not samples_ms:
         print(f"{label}: no samples")
         return
-    mean   = statistics.mean(samples_ms)
+    mean = statistics.mean(samples_ms)
     median = statistics.median(samples_ms)
-    p95    = sorted(samples_ms)[int(len(samples_ms) * 0.95) - 1] if len(samples_ms) > 1 else samples_ms[0]
+    p95 = (
+        sorted(samples_ms)[int(len(samples_ms) * 0.95) - 1]
+        if len(samples_ms) > 1
+        else samples_ms[0]
+    )
     print(
         f"{label:<28} mean={mean:7.1f}ms  median={median:7.1f}ms  "
         f"p95={p95:7.1f}ms  n={len(samples_ms)}"
@@ -78,7 +83,7 @@ def run(args: argparse.Namespace) -> None:
     provider.read(frames[0])
 
     prep_samples: list[float] = []
-    inf_samples:  list[float] = []
+    inf_samples: list[float] = []
     total_samples: list[float] = []
 
     for frame in frames:
@@ -90,8 +95,10 @@ def run(args: argparse.Namespace) -> None:
         inf_samples.append(provider.inference_ms)
 
     print()
-    print(f"=== Results ({len(frames)} frames, lang={args.lang}, "
-          f"gpu={ocrp._USE_GPU}, fp16={ocrp.USE_FP16}) ===")
+    print(
+        f"=== Results ({len(frames)} frames, lang={args.lang}, "
+        f"gpu={ocrp._USE_GPU}, fp16={ocrp.USE_FP16}) ==="
+    )
     summarize("preprocess", prep_samples)
     summarize("inference (readtext)", inf_samples)
     summarize("total per frame", total_samples)

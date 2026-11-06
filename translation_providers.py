@@ -6,6 +6,7 @@ ArgosTranslator wraps translator.py (offline Argos Translate + FIFO cache).
 Future engines (CTranslate2, DeepL…) implement BaseTranslator without touching
 any other module.
 """
+
 from __future__ import annotations
 
 import logging
@@ -38,16 +39,20 @@ class ArgosTranslator(BaseTranslator):
 
     def translate(self, text: str, from_code: str, to_code: str) -> str:
         import translator as _t
+
         return _t.translate_text(text, from_code, to_code)
 
     def translate_many(self, texts: list[str], from_code: str, to_code: str) -> list[str]:
         import translator as _t
+
         return _t.translate_many(texts, from_code, to_code)
 
     def warm_up(self, from_code: str, to_code: str) -> bool:
         import translator as _t
+
         return _t.preload_model(from_code, to_code)
 
     def clear_cache(self) -> None:
         import translator as _t
+
         _t.clear_translation_cache()

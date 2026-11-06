@@ -11,6 +11,7 @@ continuously. Readers (OCRWorker, render timer) simply read that attribute.
 Thread safety: Python's GIL makes a single-reference attribute assignment
 atomic for readers. A Lock guards the mutable region dict.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,13 +23,14 @@ import numpy as np
 
 log = logging.getLogger("langscope.capture")
 
-TARGET_FPS     = 60.0
+TARGET_FPS = 60.0
 FRAME_INTERVAL = 1.0 / TARGET_FPS
 
 
 def _primary_monitor_rect() -> tuple[int, int, int, int]:
     """(left, top, width, height) of the primary monitor in desktop pixels."""
     from mss import mss as _mss
+
     with _mss() as sct:
         monitors = sct.monitors[1:] or sct.monitors[:1]
     for m in monitors:
@@ -41,6 +43,7 @@ def _primary_monitor_rect() -> tuple[int, int, int, int]:
 def _try_dxcam():
     try:
         import dxcam
+
         return dxcam
     except ImportError:
         return None
@@ -58,12 +61,12 @@ class CaptureManager:
 
     def __init__(self):
         self.latest_frame: Optional[np.ndarray] = None
-        self._region:      dict   = {"top": 0, "left": 0, "width": 800, "height": 600}
-        self._region_lock  = threading.Lock()
-        self._running:     bool   = False
+        self._region: dict = {"top": 0, "left": 0, "width": 800, "height": 600}
+        self._region_lock = threading.Lock()
+        self._running: bool = False
         self._thread: Optional[threading.Thread] = None
-        self._dxcam                = _try_dxcam()
-        self._backend: str         = "dxcam" if self._dxcam else "mss"
+        self._dxcam = _try_dxcam()
+        self._backend: str = "dxcam" if self._dxcam else "mss"
         log.info(f"[Capture] Backend: {self._backend}")
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -75,9 +78,7 @@ class CaptureManager:
         # Don't let OCR / the live feed see the previous region's last frame.
         self.latest_frame = None
         self._running = True
-        self._thread  = threading.Thread(
-            target=self._loop, name="CaptureThread", daemon=True
-        )
+        self._thread = threading.Thread(target=self._loop, name="CaptureThread", daemon=True)
         self._thread.start()
         log.debug("CaptureManager started (backend=%s)", self._backend)
 
@@ -117,26 +118,31 @@ class CaptureManager:
         sct = None
         try:
             from mss import mss as _mss
+
             px, py, pw, ph = _primary_monitor_rect()
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:
                     r = dict(self._region)
                 inside_primary = (
-                    r["left"] >= px and r["top"] >= py
-                    and r["left"] + r["width"]  <= px + pw
-                    and r["top"]  + r["height"] <= py + ph
+                    r["left"] >= px
+                    and r["top"] >= py
+                    and r["left"] + r["width"] <= px + pw
+                    and r["top"] + r["height"] <= py + ph
                 )
                 if inside_primary:
-                    frame = camera.grab(region=(
-                        r["left"] - px, r["top"] - py,
-                        r["left"] - px + r["width"],
-                        r["top"]  - py + r["height"],
-                    ))
+                    frame = camera.grab(
+                        region=(
+                            r["left"] - px,
+                            r["top"] - py,
+                            r["left"] - px + r["width"],
+                            r["top"] - py + r["height"],
+                        )
+                    )
                 else:
                     if sct is None:
                         sct = _mss()
-                    frame = np.array(sct.grab(r))[..., :3]   # BGRA → BGR
+                    frame = np.array(sct.grab(r))[..., :3]  # BGRA → BGR
                 if frame is not None:
                     self.latest_frame = frame
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))
@@ -158,11 +164,12 @@ class CaptureManager:
 
     def _loop_mss(self) -> None:
         from mss import mss as _mss
+
         with _mss() as sct:
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:
                     r = dict(self._region)
                 screenshot = sct.grab(r)
-                self.latest_frame = np.array(screenshot)[..., :3]   # BGRA → BGR
+                self.latest_frame = np.array(screenshot)[..., :3]  # BGRA → BGR
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))

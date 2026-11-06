@@ -10,12 +10,13 @@ The window is:
 Enable/disable via OverlayWindow.set_active(bool).
 Update content via OverlayWindow.update_regions(regions, region_rect).
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-from PyQt6.QtCore  import Qt
-from PyQt6.QtGui   import QPainter, QPaintEvent, QKeyEvent
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPainter, QPaintEvent, QKeyEvent
 from PyQt6.QtWidgets import QWidget
 
 from models import TranslationRegion
@@ -32,24 +33,25 @@ class OverlayWindow(QWidget):
     """
 
     def __init__(self, parent=None):
-        super().__init__(parent,
-            Qt.WindowType.FramelessWindowHint        |
-            Qt.WindowType.WindowStaysOnTopHint       |
-            Qt.WindowType.Tool                       |
-            Qt.WindowType.WindowTransparentForInput,
+        super().__init__(
+            parent,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowTransparentForInput,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self._regions: list[TranslationRegion] = []
-        self._active   = False
-        self._dpr      = 1.0
+        self._active = False
+        self._dpr = 1.0
         self._rect_key: tuple | None = None
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def set_active(self, active: bool) -> None:
         self._active = active
-        self._rect_key = None      # force re-position on next update
+        self._rect_key = None  # force re-position on next update
         if active:
             self.show()
             self.raise_()
@@ -58,16 +60,20 @@ class OverlayWindow(QWidget):
 
     def update_regions(
         self,
-        regions:     list[TranslationRegion],
-        capture_rect: dict,           # {"top", "left", "width", "height"}
+        regions: list[TranslationRegion],
+        capture_rect: dict,  # {"top", "left", "width", "height"}
     ) -> None:
         """Reposition window over capture region and update displayed regions."""
         if not self._active:
             return
         # capture_rect is in native desktop pixels; Qt windows use logical
         # coordinates on the screen the region lives on.
-        key = (capture_rect["left"], capture_rect["top"],
-               capture_rect["width"], capture_rect["height"])
+        key = (
+            capture_rect["left"],
+            capture_rect["top"],
+            capture_rect["width"],
+            capture_rect["height"],
+        )
         if key != self._rect_key:
             self._rect_key = key
             logical, dpr, screen = native_region_to_logical(capture_rect)
@@ -99,20 +105,25 @@ class OverlayWindow(QWidget):
             if not reg.has_translation:
                 continue
 
-            pts  = np.array(reg.bbox, dtype=float)
-            x1   = int(pts[:, 0].min())
-            y1   = int(pts[:, 1].min())
-            x2   = int(pts[:, 0].max())
-            y2   = int(pts[:, 1].max())
-            bw   = max(1, x2 - x1)
-            bh   = max(1, y2 - y1)
+            pts = np.array(reg.bbox, dtype=float)
+            x1 = int(pts[:, 0].min())
+            y1 = int(pts[:, 1].min())
+            x2 = int(pts[:, 0].max())
+            y2 = int(pts[:, 1].max())
+            bw = max(1, x2 - x1)
+            bh = max(1, y2 - y1)
 
             # Shared bbox-clamped, word-wrapped, shrink-to-fit renderer keeps
             # the desktop overlay visually consistent with the live feed.
             draw_translated_text(
-                p, reg.translated_text,
-                x1, y1, bw, bh,
-                W, H,
+                p,
+                reg.translated_text,
+                x1,
+                y1,
+                bw,
+                bh,
+                W,
+                H,
                 max_font_pt=24,
             )
 

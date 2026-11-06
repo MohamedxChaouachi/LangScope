@@ -5,6 +5,7 @@ Reads CaptureManager.latest_frame, applies frame-hash + motion-threshold
 gating so OCR only fires when the screen actually changes, then emits
 raw_segments_ready(list[RawSegment]).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -19,10 +20,10 @@ from ocr_providers import BaseOCR, EasyOCRProvider
 
 log = logging.getLogger("langscope.ocr_worker")
 
-OCR_FPS        = 8.0
-OCR_INTERVAL   = 1.0 / OCR_FPS
-PIXEL_DELTA    = 40    # per-pixel intensity change that counts as "changed"
-MIN_CHANGED_PX = 12    # changed pixels (at half resolution) needed to re-run OCR
+OCR_FPS = 8.0
+OCR_INTERVAL = 1.0 / OCR_FPS
+PIXEL_DELTA = 40  # per-pixel intensity change that counts as "changed"
+MIN_CHANGED_PX = 12  # changed pixels (at half resolution) needed to re-run OCR
 
 
 def _hash_frame(frame: np.ndarray) -> str:
@@ -56,21 +57,20 @@ class OCRWorker(QThread):
 
     raw_segments_ready = pyqtSignal(object)
 
-    def __init__(self, capture: CaptureManager,
-                 ocr: BaseOCR | None = None, parent=None):
+    def __init__(self, capture: CaptureManager, ocr: BaseOCR | None = None, parent=None):
         super().__init__(parent)
-        self._capture  = capture
-        self._ocr      = ocr or EasyOCRProvider()
-        self._running  = True
-        self._last_hash  = ""
+        self._capture = capture
+        self._ocr = ocr or EasyOCRProvider()
+        self._running = True
+        self._last_hash = ""
         self._last_frame: np.ndarray | None = None
 
         # Exposed metrics
-        self.ocr_ms         = 0.0
-        self.preprocess_ms  = 0.0   # split out of ocr_ms — see ocr_providers.read()
-        self.inference_ms   = 0.0
+        self.ocr_ms = 0.0
+        self.preprocess_ms = 0.0  # split out of ocr_ms — see ocr_providers.read()
+        self.inference_ms = 0.0
         self.frames_skipped = 0
-        self.ocr_calls      = 0
+        self.ocr_calls = 0
 
         # Rolling average over the last _AVG_WINDOW calls — smooths out
         # single-frame noise so the number on screen / in logs is actually
@@ -83,7 +83,7 @@ class OCRWorker(QThread):
 
     def set_languages(self, from_code: str, to_code: str) -> None:
         self._ocr.set_language(from_code)
-        self._last_hash = ""   # force re-OCR
+        self._last_hash = ""  # force re-OCR
 
     def stop(self) -> None:
         self._running = False
@@ -95,13 +95,13 @@ class OCRWorker(QThread):
         log.debug("OCRWorker started (%.0f FPS)", OCR_FPS)
         # stop() leaves _running False; without this reset a restarted thread
         # would exit immediately and OCR would silently never run again.
-        self._running    = True
+        self._running = True
         # Forget the previous region's frame so the first frame after a restart
         # is always OCR'd, even if the screen content hasn't changed.
-        self._last_hash  = ""
+        self._last_hash = ""
         self._last_frame = None
         while self._running:
-            t0    = time.perf_counter()
+            t0 = time.perf_counter()
             frame = self._capture.latest_frame
 
             if frame is None:
@@ -123,18 +123,18 @@ class OCRWorker(QThread):
                     self._sleep(t0)
                     continue
 
-            self._last_hash  = fhash
+            self._last_hash = fhash
             self._last_frame = frame.copy()
 
             try:
                 t_ocr = time.perf_counter()
-                segs  = self._ocr.read(frame)
-                self.ocr_ms     = (time.perf_counter() - t_ocr) * 1000
+                segs = self._ocr.read(frame)
+                self.ocr_ms = (time.perf_counter() - t_ocr) * 1000
                 self.ocr_calls += 1
 
                 # Pull the preprocess/inference split if the provider tracks it
                 self.preprocess_ms = getattr(self._ocr, "preprocess_ms", 0.0)
-                self.inference_ms  = getattr(self._ocr, "inference_ms", 0.0)
+                self.inference_ms = getattr(self._ocr, "inference_ms", 0.0)
 
                 self._recent_ms.append(self.ocr_ms)
                 if len(self._recent_ms) > self._AVG_WINDOW:
@@ -143,8 +143,11 @@ class OCRWorker(QThread):
 
                 log.debug(
                     "OCR %.1f ms (prep=%.1f inf=%.1f, avg=%.1f) — %d segs",
-                    self.ocr_ms, self.preprocess_ms, self.inference_ms,
-                    self.avg_ocr_ms, len(segs),
+                    self.ocr_ms,
+                    self.preprocess_ms,
+                    self.inference_ms,
+                    self.avg_ocr_ms,
+                    len(segs),
                 )
                 self.raw_segments_ready.emit(segs)
             except Exception as exc:

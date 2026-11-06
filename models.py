@@ -2,6 +2,7 @@
 models.py — Shared data structures for LangScope.
 No project-level dependencies — safe to import from any module.
 """
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 import time
@@ -11,8 +12,9 @@ import uuid
 @dataclass
 class RawSegment:
     """A single OCR detection before translation."""
-    bbox:  list   # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
-    text:  str
+
+    bbox: list  # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+    text: str
     score: float
 
 
@@ -31,15 +33,16 @@ class TranslationRegion:
         miss_count        — how many consecutive OCR cycles this region was
                             not matched. Used to decide when to prune.
     """
-    bbox:            list
-    original_text:   str
+
+    bbox: list
+    original_text: str
     translated_text: str
-    timestamp:       float = field(default_factory=time.monotonic)
-    region_id:       str   = field(default_factory=lambda: uuid.uuid4().hex[:8])
-    confidence:      float = 1.0
-    last_seen:       float = field(default_factory=time.monotonic)
-    smoothed_bbox:   list  = field(default=None)          # set in __post_init__
-    miss_count:      int   = 0
+    timestamp: float = field(default_factory=time.monotonic)
+    region_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    confidence: float = 1.0
+    last_seen: float = field(default_factory=time.monotonic)
+    smoothed_bbox: list = field(default=None)  # set in __post_init__
+    miss_count: int = 0
 
     def __post_init__(self) -> None:
         if self.smoothed_bbox is None:

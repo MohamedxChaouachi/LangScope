@@ -19,33 +19,75 @@ import numpy as np
 import qtawesome as qta
 
 from PyQt6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QComboBox, QFrame,
-    QSizePolicy, QCheckBox,
+    QWidget,
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QComboBox,
+    QFrame,
+    QSizePolicy,
+    QCheckBox,
 )
 from PyQt6.QtCore import Qt, QRect, QPoint, QSize, QObject, pyqtSignal
-from PyQt6.QtGui  import (
-    QFont, QPainter, QColor, QPen,
-    QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent, QIcon,
-    QScreen, QGuiApplication, QCursor,
+from PyQt6.QtGui import (
+    QFont,
+    QPainter,
+    QColor,
+    QPen,
+    QPixmap,
+    QImage,
+    QKeyEvent,
+    QMouseEvent,
+    QPaintEvent,
+    QIcon,
+    QScreen,
+    QGuiApplication,
+    QCursor,
 )
 
 from render_utils import draw_translated_text
 from screen_utils import local_rect_to_native, screen_at_native_point, screen_index
 from theme import (
-    COLOR_TEXT, COLOR_WHITE,
-    COLOR_ACCENT, COLOR_ACCENT_SOFT, COLOR_SURFACE, COLOR_BADGE,
-    COLOR_STATUS, COLOR_SEPARATOR, COLOR_BORDER,
-    COLOR_PRIMARY, COLOR_PRIMARY_HOVER, COLOR_PRIMARY_PRESSED,
-    COLOR_SECONDARY, COLOR_SECONDARY_HOVER, COLOR_SECONDARY_PRESSED,
-    COLOR_SECONDARY_TEXT, COLOR_SELECTION,
-    COLOR_DANGER, COLOR_DANGER_HOVER, COLOR_DANGER_PRESSED,
-    COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
-    COLOR_FEED_BG, COLOR_FEED_PLACEHOLDER,
-    FONT_FAMILY, FONT_FAMILY_MONO,
-    FONT_SIZE_BASE, FONT_SIZE_SM, FONT_SIZE_XS, FONT_SIZE_LG, FONT_SIZE_TITLE,
-    SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL, SPACE_XXL,
-    RADIUS_SM, RADIUS_MD,
+    COLOR_TEXT,
+    COLOR_WHITE,
+    COLOR_ACCENT,
+    COLOR_ACCENT_SOFT,
+    COLOR_SURFACE,
+    COLOR_BADGE,
+    COLOR_STATUS,
+    COLOR_SEPARATOR,
+    COLOR_BORDER,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_HOVER,
+    COLOR_PRIMARY_PRESSED,
+    COLOR_SECONDARY,
+    COLOR_SECONDARY_HOVER,
+    COLOR_SECONDARY_PRESSED,
+    COLOR_SECONDARY_TEXT,
+    COLOR_SELECTION,
+    COLOR_DANGER,
+    COLOR_DANGER_HOVER,
+    COLOR_DANGER_PRESSED,
+    COLOR_DISABLED_BG,
+    COLOR_DISABLED_TEXT,
+    COLOR_FEED_BG,
+    COLOR_FEED_PLACEHOLDER,
+    FONT_FAMILY,
+    FONT_FAMILY_MONO,
+    FONT_SIZE_BASE,
+    FONT_SIZE_SM,
+    FONT_SIZE_XS,
+    FONT_SIZE_LG,
+    FONT_SIZE_TITLE,
+    SPACE_XS,
+    SPACE_SM,
+    SPACE_MD,
+    SPACE_LG,
+    SPACE_XL,
+    SPACE_XXL,
+    RADIUS_SM,
+    RADIUS_MD,
 )
 
 # Primary UI font family (first available), used where QFont is set directly.
@@ -71,26 +113,27 @@ _CHECK_ICON_URL = _CHECK_ICON_PATH.replace("\\", "/")
 # ─────────────────────────────────────────────────────────────────────────────
 
 ALL_LANGUAGES: list[tuple[str, str]] = [
-    ("🇬🇧  English",    "en"),
-    ("🇫🇷  French",     "fr"),
-    ("🇪🇸  Spanish",    "es"),
-    ("🇩🇪  German",     "de"),
-    ("🇮🇹  Italian",    "it"),
+    ("🇬🇧  English", "en"),
+    ("🇫🇷  French", "fr"),
+    ("🇪🇸  Spanish", "es"),
+    ("🇩🇪  German", "de"),
+    ("🇮🇹  Italian", "it"),
     ("🇵🇹  Portuguese", "pt"),
-    ("🇷🇴  Romanian",   "ro"),
-    ("🇷🇺  Russian",    "ru"),
-    ("🇨🇳  Chinese",    "zh"),
-    ("🇯🇵  Japanese",   "ja"),
-    ("🇦🇪  Arabic",     "ar"),
+    ("🇷🇴  Romanian", "ro"),
+    ("🇷🇺  Russian", "ru"),
+    ("🇨🇳  Chinese", "zh"),
+    ("🇯🇵  Japanese", "ja"),
+    ("🇦🇪  Arabic", "ar"),
 ]
 
-_DEFAULT_FROM_IDX = 0   # English
-_DEFAULT_TO_IDX   = 1   # French
+_DEFAULT_FROM_IDX = 0  # English
+_DEFAULT_TO_IDX = 1  # French
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RegionSelector  (multi-monitor)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class _ScreenSelectorWindow(QWidget):
     """
@@ -99,19 +142,18 @@ class _ScreenSelectorWindow(QWidget):
     Emits `region_picked(top, left, width, height)` in NATIVE desktop pixels
     (see screen_utils), so the result is valid on any monitor and DPI.
     """
+
     region_picked = pyqtSignal(int, int, int, int)
-    cancelled     = pyqtSignal()
-    _DIM_ALPHA    = 130
+    cancelled = pyqtSignal()
+    _DIM_ALPHA = 130
 
     def __init__(self, screen: QScreen, label: str):
         super().__init__()
         self._screen = screen
-        self._label  = label
-        self._origin:  QPoint | None = None
+        self._label = label
+        self._origin: QPoint | None = None
         self._current: QPoint | None = None
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
-        )
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setScreen(screen)
@@ -164,13 +206,15 @@ class _ScreenSelectorWindow(QWidget):
             p.setPen(QColor("#FFFFFF"))
             p.setFont(QFont(_UI_FONT, 10))
             d = self._screen.devicePixelRatio()
-            p.drawText(r.left() + 4, r.top() - 6,
-                       f"{round(r.width() * d)} x {round(r.height() * d)} px")
+            p.drawText(
+                r.left() + 4, r.top() - 6, f"{round(r.width() * d)} x {round(r.height() * d)} px"
+            )
         else:
             p.setPen(QColor("#FFFFFF"))
             p.setFont(QFont(_UI_FONT, 14))
             p.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter,
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
                 f"{self._label}\n"
                 "Click and drag to select the capture region\n"
                 "(ESC or right-click to cancel)",
@@ -189,6 +233,7 @@ class RegionSelector(QObject):
     pixels (origin = top-left of the primary screen; may be negative for
     monitors placed left of / above the primary).
     """
+
     region_selected = pyqtSignal(int, int, int, int)
 
     def __init__(self, parent=None):
@@ -221,8 +266,7 @@ class RegionSelector(QObject):
         if not self._windows:
             return
         cur = QCursor.pos()
-        target = next((w for w in self._windows if w.geometry().contains(cur)),
-                      self._windows[0])
+        target = next((w for w in self._windows if w.geometry().contains(cur)), self._windows[0])
         target.activateWindow()
         target.setFocus()
 
@@ -240,6 +284,7 @@ class RegionSelector(QObject):
 # ─────────────────────────────────────────────────────────────────────────────
 # LiveFeedWidget
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class LiveFeedWidget(QWidget):
     """
@@ -262,11 +307,11 @@ class LiveFeedWidget(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(250)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._pixmap:      QPixmap | None = None
-        self._detections:  list           = []
-        self._orig_w:      int            = 1
-        self._orig_h:      int            = 1
-        self._debug_mode:  bool           = False
+        self._pixmap: QPixmap | None = None
+        self._detections: list = []
+        self._orig_w: int = 1
+        self._orig_h: int = 1
+        self._debug_mode: bool = False
 
     def set_debug(self, enabled: bool) -> None:
         self._debug_mode = enabled
@@ -274,16 +319,16 @@ class LiveFeedWidget(QWidget):
 
     def update_frame(
         self,
-        frame_bgr:  np.ndarray,
+        frame_bgr: np.ndarray,
         detections: list,
-        orig_w:     int,
-        orig_h:     int,
+        orig_w: int,
+        orig_h: int,
     ) -> None:
         """Called from the main thread every ~16 ms by the render timer."""
         self._detections = detections
-        self._orig_w     = max(1, orig_w)
-        self._orig_h     = max(1, orig_h)
-        rgb  = np.ascontiguousarray(frame_bgr[:, :, ::-1])
+        self._orig_w = max(1, orig_w)
+        self._orig_h = max(1, orig_h)
+        rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
         qimg = QImage(rgb.data, orig_w, orig_h, orig_w * 3, QImage.Format.Format_RGB888)
         self._pixmap = QPixmap.fromImage(qimg.copy())
         self.update()
@@ -304,11 +349,12 @@ class LiveFeedWidget(QWidget):
             return
 
         scaled = self._pixmap.scaled(
-            W, H,
+            W,
+            H,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        px = (W - scaled.width())  // 2
+        px = (W - scaled.width()) // 2
         py = (H - scaled.height()) // 2
 
         p.fillRect(0, 0, W, H, QColor(COLOR_FEED_BG))
@@ -317,22 +363,22 @@ class LiveFeedWidget(QWidget):
         if not self._detections:
             return
 
-        sx = scaled.width()  / self._orig_w
+        sx = scaled.width() / self._orig_w
         sy = scaled.height() / self._orig_h
 
         for entry in self._detections:
             # Support both 3-tuple (legacy) and 5-tuple (debug) formats
             bbox, original, translated = entry[0], entry[1], entry[2]
-            region_id  = entry[3] if len(entry) > 3 else ""
+            region_id = entry[3] if len(entry) > 3 else ""
             confidence = entry[4] if len(entry) > 4 else None
 
             pts = np.array(bbox, dtype=float)
-            x1  = int(pts[:, 0].min() * sx) + px
-            y1  = int(pts[:, 1].min() * sy) + py
-            x2  = int(pts[:, 0].max() * sx) + px
-            y2  = int(pts[:, 1].max() * sy) + py
-            bw  = max(1, x2 - x1)
-            bh  = max(1, y2 - y1)
+            x1 = int(pts[:, 0].min() * sx) + px
+            y1 = int(pts[:, 1].min() * sy) + py
+            x2 = int(pts[:, 0].max() * sx) + px
+            y2 = int(pts[:, 1].max() * sy) + py
+            bw = max(1, x2 - x1)
+            bh = max(1, y2 - y1)
 
             # ── Debug overlay ─────────────────────────────────────────────────
             if self._debug_mode:
@@ -353,9 +399,14 @@ class LiveFeedWidget(QWidget):
 
             # Shared bbox-clamped, word-wrapped, shrink-to-fit renderer.
             draw_translated_text(
-                p, translated,
-                x1, y1, bw, bh,
-                W, H,
+                p,
+                translated,
+                x1,
+                y1,
+                bw,
+                bh,
+                W,
+                H,
                 max_font_pt=24,
             )
 
@@ -364,13 +415,14 @@ class LiveFeedWidget(QWidget):
 # ControlPanel
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ControlPanel(QWidget):
-    start_requested       = pyqtSignal()
-    stop_requested        = pyqtSignal()
-    region_changed        = pyqtSignal(int, int, int, int)
+    start_requested = pyqtSignal()
+    stop_requested = pyqtSignal()
+    region_changed = pyqtSignal(int, int, int, int)
     language_pair_changed = pyqtSignal(str, str)
-    overlay_toggled       = pyqtSignal(bool)
-    debug_toggled         = pyqtSignal(bool)   # NEW
+    overlay_toggled = pyqtSignal(bool)
+    debug_toggled = pyqtSignal(bool)  # NEW
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -395,13 +447,15 @@ class ControlPanel(QWidget):
         # ── Compact top toolbar ───────────────────────────────────────────────
         # A single framed toolbar holding two rows so the live feed gets the
         # rest of the vertical space by default.
-        toolbar = QFrame(); toolbar.setObjectName("toolbar")
+        toolbar = QFrame()
+        toolbar.setObjectName("toolbar")
         tb = QVBoxLayout(toolbar)
         tb.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_MD, SPACE_SM)
         tb.setSpacing(SPACE_SM)
 
         # Row 1 — brand + language pickers
-        row1 = QHBoxLayout(); row1.setSpacing(SPACE_MD)
+        row1 = QHBoxLayout()
+        row1.setSpacing(SPACE_MD)
 
         title_icon = QLabel()
         title_icon.setObjectName("title_icon")
@@ -424,23 +478,23 @@ class ControlPanel(QWidget):
         row1.addWidget(self._lbl("FROM"))
         self._from_combo = self._combo(_DEFAULT_FROM_IDX)
         row1.addWidget(self._from_combo, stretch=1)
-        self._from_badge = QLabel(""); self._from_badge.setObjectName("badge")
+        self._from_badge = QLabel("")
+        self._from_badge.setObjectName("badge")
         self._from_badge.setFixedWidth(70)
         row1.addWidget(self._from_badge)
 
         # arrow separator between the two pickers
         arrow = QLabel()
         arrow.setObjectName("title_icon")
-        arrow.setPixmap(
-            qta.icon("fa5s.arrow-right", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
-        )
+        arrow.setPixmap(qta.icon("fa5s.arrow-right", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14)))
         row1.addWidget(arrow)
 
         # TO picker
         row1.addWidget(self._lbl("TO"))
         self._to_combo = self._combo(_DEFAULT_TO_IDX)
         row1.addWidget(self._to_combo, stretch=1)
-        self._to_badge = QLabel(""); self._to_badge.setObjectName("badge")
+        self._to_badge = QLabel("")
+        self._to_badge.setObjectName("badge")
         self._to_badge.setFixedWidth(70)
         row1.addWidget(self._to_badge)
 
@@ -450,7 +504,8 @@ class ControlPanel(QWidget):
         self._to_combo.currentIndexChanged.connect(self._on_lang_changed)
 
         # Row 2 — actions + toggles + region info
-        row2 = QHBoxLayout(); row2.setSpacing(SPACE_MD)
+        row2 = QHBoxLayout()
+        row2.setSpacing(SPACE_MD)
 
         self._select_btn = QPushButton("  Select Region")
         self._select_btn.setObjectName("secondary")
@@ -481,7 +536,7 @@ class ControlPanel(QWidget):
         row2.addWidget(self._overlay_chk)
 
         self._debug_chk = QCheckBox("  Debug Mode")
-        self._debug_chk.setObjectName("overlay_chk")   # reuse same style
+        self._debug_chk.setObjectName("overlay_chk")  # reuse same style
         self._debug_chk.setCursor(Qt.CursorShape.PointingHandCursor)
         self._debug_chk.setIcon(qta.icon("fa5s.search", color=COLOR_ACCENT_SOFT))
         self._debug_chk.setIconSize(QSize(16, 16))
@@ -533,14 +588,19 @@ class ControlPanel(QWidget):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _lbl(self, t: str) -> QLabel:
-        l = QLabel(t); l.setObjectName("section_label"); return l
+        l = QLabel(t)
+        l.setObjectName("section_label")
+        return l
 
     def _sep(self) -> QFrame:
-        f = QFrame(); f.setFrameShape(QFrame.Shape.HLine)
-        f.setObjectName("separator"); return f
+        f = QFrame()
+        f.setFrameShape(QFrame.Shape.HLine)
+        f.setObjectName("separator")
+        return f
 
     def _combo(self, idx: int) -> QComboBox:
-        c = QComboBox(); c.setObjectName("combo")
+        c = QComboBox()
+        c.setObjectName("combo")
         for name, code in ALL_LANGUAGES:
             c.addItem(name, userData=code)
         c.setCurrentIndex(idx)
@@ -560,7 +620,8 @@ class ControlPanel(QWidget):
         self._region_label.setText(f"{where}({left}, {top})  —  {w} x {h} px")
         self._start_btn.setEnabled(True)
         self.region_changed.emit(top, left, w, h)
-        self.activateWindow(); self.raise_()
+        self.activateWindow()
+        self.raise_()
 
     def _on_lang_changed(self, _: int) -> None:
         self.language_pair_changed.emit(
@@ -588,8 +649,7 @@ class ControlPanel(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def update_live_feed(self, frame_bgr, detections: list,
-                         orig_w: int, orig_h: int) -> None:
+    def update_live_feed(self, frame_bgr, detections: list, orig_w: int, orig_h: int) -> None:
         self._feed.update_frame(frame_bgr, detections, orig_w, orig_h)
 
     def set_debug(self, enabled: bool) -> None:
@@ -607,12 +667,12 @@ class ControlPanel(QWidget):
 
     def set_stats(
         self,
-        ocr_ms:         float,
-        preprocess_ms:  float,
-        inference_ms:   float,
-        translate_ms:   float,
-        cache_hits:     int,
-        cache_misses:   int,
+        ocr_ms: float,
+        preprocess_ms: float,
+        inference_ms: float,
+        translate_ms: float,
+        cache_hits: int,
+        cache_misses: int,
     ) -> None:
         """Update the debug stats strip. No-op display unless Debug Mode is on."""
         total = cache_hits + cache_misses
@@ -640,10 +700,7 @@ class ControlPanel(QWidget):
 
     def _apply_styles(self) -> None:
         # White tick drawn inside the checked indicator (if the asset exists).
-        _check_img = (
-            f" image:url('{_CHECK_ICON_URL}');"
-            if os.path.exists(_CHECK_ICON_PATH) else ""
-        )
+        _check_img = f" image:url('{_CHECK_ICON_URL}');" if os.path.exists(_CHECK_ICON_PATH) else ""
         self.setStyleSheet(f"""
             /* ── Base ─────────────────────────────────────────────────────── */
             QWidget {{ background:{COLOR_WHITE}; color:{COLOR_TEXT};

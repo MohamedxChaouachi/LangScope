@@ -16,6 +16,7 @@ Qt keeps each QScreen's top-left in native coordinates and only divides the
 A region never spans two screens (it is drawn on one screen), so every
 conversion is done relative to a single QScreen.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -54,9 +55,9 @@ def local_rect_to_native(screen: QScreen, rect: QRect) -> tuple[int, int, int, i
     """
     g = screen.geometry()
     d = screen.devicePixelRatio()
-    left   = g.x() + round(rect.left() * d)
-    top    = g.y() + round(rect.top()  * d)
-    width  = max(1, round(rect.width()  * d))
+    left = g.x() + round(rect.left() * d)
+    top = g.y() + round(rect.top() * d)
+    width = max(1, round(rect.width() * d))
     height = max(1, round(rect.height() * d))
     return top, left, width, height
 
@@ -68,15 +69,15 @@ def native_region_to_logical(region: dict) -> tuple[QRect, float, Optional[QScre
 
     Returns (logical_rect, device_pixel_ratio, screen).
     """
-    cx = region["left"] + region["width"]  // 2
-    cy = region["top"]  + region["height"] // 2
+    cx = region["left"] + region["width"] // 2
+    cy = region["top"] + region["height"] // 2
     screen = screen_at_native_point(cx, cy)
     g = screen.geometry()
     d = screen.devicePixelRatio() or 1.0
     rect = QRect(
         g.x() + round((region["left"] - g.x()) / d),
-        g.y() + round((region["top"]  - g.y()) / d),
-        max(1, round(region["width"]  / d)),
+        g.y() + round((region["top"] - g.y()) / d),
+        max(1, round(region["width"] / d)),
         max(1, round(region["height"] / d)),
     )
     return rect, d, screen

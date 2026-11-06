@@ -14,21 +14,22 @@ import logging
 import os
 import sys
 
-from PyQt6.QtCore    import QThread, pyqtSignal, QTimer
-from PyQt6.QtGui     import QIcon
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 import translator
-from ui                   import ControlPanel, APP_ICON_PATH
-from capture_manager      import CaptureManager
-from ocr_worker           import OCRWorker
-from translation_worker   import TranslationWorker
-from overlay_window       import OverlayWindow
+from ui import ControlPanel, APP_ICON_PATH
+from capture_manager import CaptureManager
+from ocr_worker import OCRWorker
+from translation_worker import TranslationWorker
+from overlay_window import OverlayWindow
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PackageSetupThread  (unchanged from original)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class PackageSetupThread(QThread):
     setup_finished = pyqtSignal(str, str, bool)
@@ -36,7 +37,7 @@ class PackageSetupThread(QThread):
     def __init__(self, from_code: str, to_code: str, parent=None):
         super().__init__(parent)
         self._from_code = from_code
-        self._to_code   = to_code
+        self._to_code = to_code
 
     def run(self) -> None:
         ok = translator.setup_translation_models(self._from_code, self._to_code)
@@ -66,35 +67,34 @@ if __name__ == "__main__":
         app.setWindowIcon(QIcon(APP_ICON_PATH))
 
     # ── UI ────────────────────────────────────────────────────────────────────
-    panel   = ControlPanel()
+    panel = ControlPanel()
     panel.show()
 
     overlay = OverlayWindow()
 
     # ── Pipeline workers ──────────────────────────────────────────────────────
-    capture_mgr  = CaptureManager()
-    ocr_worker   = OCRWorker(capture_mgr)
-    tx_worker    = TranslationWorker()
+    capture_mgr = CaptureManager()
+    ocr_worker = OCRWorker(capture_mgr)
+    tx_worker = TranslationWorker()
 
     # OCR → TranslationWorker (cross-thread, via queue)
     ocr_worker.raw_segments_ready.connect(tx_worker.enqueue)
 
     # ── Render timer (60 FPS) ─────────────────────────────────────────────────
     _capture_region: dict = {"top": 100, "left": 100, "width": 500, "height": 200}
-    _fps_counter    = {"frames": 0, "t0": 0.0}
+    _fps_counter = {"frames": 0, "t0": 0.0}
 
     def _render_tick() -> None:
         frame = capture_mgr.latest_frame
         if frame is None:
             return
-        h, w  = frame.shape[:2]
-        regs  = tx_worker.latest_regions
+        h, w = frame.shape[:2]
+        regs = tx_worker.latest_regions
 
         # Convert TranslationRegion list → 5-tuple for LiveFeedWidget
         # (bbox=smoothed, original, translated, region_id, confidence)
         detections = [
-            (r.smoothed_bbox, r.original_text, r.translated_text,
-             r.region_id, r.confidence)
+            (r.smoothed_bbox, r.original_text, r.translated_text, r.region_id, r.confidence)
             for r in regs
         ]
         panel.update_live_feed(frame, detections, w, h)
@@ -104,27 +104,28 @@ if __name__ == "__main__":
 
         # FPS counter
         import time
+
         _fps_counter["frames"] += 1
         now = time.perf_counter()
         if now - _fps_counter["t0"] >= 1.0:
             fps = _fps_counter["frames"] / (now - _fps_counter["t0"])
             panel.set_fps(fps)
             _fps_counter["frames"] = 0
-            _fps_counter["t0"]     = now
+            _fps_counter["t0"] = now
 
             # Debug stats — read straight off the workers, same as FPS above.
             # ControlPanel only shows the strip while Debug Mode is checked.
             panel.set_stats(
-                ocr_ms        = ocr_worker.avg_ocr_ms,
-                preprocess_ms = ocr_worker.preprocess_ms,
-                inference_ms  = ocr_worker.inference_ms,
-                translate_ms  = tx_worker.translate_ms,
-                cache_hits    = tx_worker.cache_hits,
-                cache_misses  = tx_worker.cache_misses,
+                ocr_ms=ocr_worker.avg_ocr_ms,
+                preprocess_ms=ocr_worker.preprocess_ms,
+                inference_ms=ocr_worker.inference_ms,
+                translate_ms=tx_worker.translate_ms,
+                cache_hits=tx_worker.cache_hits,
+                cache_misses=tx_worker.cache_misses,
             )
 
     render_timer = QTimer()
-    render_timer.setInterval(16)   # ~60 FPS
+    render_timer.setInterval(16)  # ~60 FPS
     render_timer.timeout.connect(_render_tick)
 
     # ── Package setup helpers (unchanged logic) ───────────────────────────────
@@ -169,7 +170,7 @@ if __name__ == "__main__":
 
     # ── Seed defaults ─────────────────────────────────────────────────────────
     _init_from = panel.selected_from_language()
-    _init_to   = panel.selected_to_language()
+    _init_to = panel.selected_to_language()
     ocr_worker.set_languages(_init_from, _init_to)
     tx_worker.set_languages(_init_from, _init_to)
     trigger_package_setup(_init_from, _init_to)
