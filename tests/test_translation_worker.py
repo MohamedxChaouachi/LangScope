@@ -1,17 +1,19 @@
 """
 Tests for the pure, Qt-free helpers in translation_worker.py:
 
-    _iou        — bbox Intersection-over-Union
-    _text_sim   — difflib SequenceMatcher ratio
-    _numeric    — numeric / timestamp / phone filter (uses _TIMESTAMP_RE)
+    _iou            — bbox Intersection-over-Union
+    _text_sim       — difflib SequenceMatcher ratio
+    _numeric        — numeric / timestamp / phone filter (uses _TIMESTAMP_RE)
+    _already_target — when text is long enough to be sent to the language detector
 
-Nothing is mocked: these functions have no external dependencies beyond
-numpy (used internally by _iou) and difflib/re from the stdlib.
+Nothing is mocked except the language detector in the _already_target tests: these functions
+have no external dependencies beyond difflib/re from the stdlib.
 """
 
 import pytest
 
-from translation_worker import _TIMESTAMP_RE, _iou, _numeric, _text_sim
+import translation_worker
+from translation_worker import _TIMESTAMP_RE, _already_target, _iou, _numeric, _text_sim
 
 
 def _square(x1, y1, x2, y2):
@@ -153,6 +155,52 @@ class TestNumeric:
     def test_real_sentence_with_number_not_filtered(self):
         # Enough alpha content and not a bare timestamp/phone.
         assert _numeric("Meet me at the cafe") is False
+
+    def test_three_letters_are_enough_to_be_text(self):
+        # The limit is "fewer than 3 letters", so 3 is the smallest word that is translated.
+        assert _numeric("abc") is False
+        assert _numeric("ab") is True
+
+    def test_digits_do_not_count_as_letters(self):
+        assert _numeric("a1b2") is True
+        assert _numeric("a1b2c3") is False
+
+
+# ── _already_target ───────────────────────────────────────────────────────────
+
+
+class TestAlreadyTarget:
+    """Text is only handed to the (slow, unreliable on short text) language detector when it is
+    long enough for the detector to have something to go on."""
+
+    @pytest.fixture
+    def detector(self, monkeypatch):
+        calls = []
+
+        def fake(text, to_code):
+            calls.append((text, to_code))
+            return fake.answer
+
+        fake.answer = True
+        monkeypatch.setattr(translation_worker, "_detect_is_target", fake)
+        fake.calls = calls
+        return fake
+
+    def test_text_shorter_than_the_minimum_is_never_checked(self, detector):
+        assert _already_target("1234567", "fr") is False  # 7 characters
+        assert detector.calls == []
+
+    def test_text_of_the_minimum_length_is_checked(self, detector):
+        assert _already_target("12345678", "fr") is True  # 8 characters
+        assert detector.calls == [("12345678", "fr")]
+
+    def test_the_answer_is_the_detectors(self, detector):
+        detector.answer = False
+        assert _already_target("a long enough line", "fr") is False
+
+    def test_the_length_does_not_count_surrounding_whitespace(self, detector):
+        assert _already_target("   abc   ", "fr") is False
+        assert detector.calls == []
 
 
 class TestTimestampRegex:

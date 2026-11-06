@@ -7,6 +7,8 @@ The tests call the worker's methods directly on one thread, with a fake translat
 clock, so they need neither timing nor a running QThread.
 """
 
+import logging
+
 import pytest
 
 import translation_worker
@@ -27,17 +29,27 @@ SENTENCE = "Hello brave new world"
 
 
 class RecordingTranslator(BaseTranslator):
-    """Translates "text" to "[<to>] text" and remembers every translate_many call."""
+    """Translates "text" to "[<to>] text" and remembers every translate_many call.
+
+    Set `error` to make translate_many raise, and put a text into `answers` to make the
+    translator answer that text with a fixed value instead."""
 
     def __init__(self):
         self.calls = []  # (texts, from_code, to_code)
+        self.error = None
+        self.answers = {}
 
     def translate(self, text, from_code, to_code):
         return f"[{to_code}] {text}"
 
     def translate_many(self, texts, from_code, to_code):
         self.calls.append((list(texts), from_code, to_code))
-        return [self.translate(t, from_code, to_code) for t in texts]
+        if self.error is not None:
+            raise self.error
+        return [
+            self.answers[t] if t in self.answers else self.translate(t, from_code, to_code)
+            for t in texts
+        ]
 
     @property
     def translated_texts(self):
@@ -174,6 +186,8 @@ class TestMatching:
         worker._update([seg(x=12)])
         worker._update([seg(x=14)])
         assert len(translator.calls) == 1
+        # It does not even look the text up in the cache again.
+        assert (worker.cache_hits, worker.cache_misses) == (0, 1)
 
     def test_changed_text_in_the_same_place_is_translated_again(self, worker, translator):
         worker._update([seg("Hello brave new world")])
@@ -204,6 +218,41 @@ class TestMatching:
         # shifted by 55: intersection 45, union 155, IoU 0.290
         worker._update([seg(x=55, width=100)])
         assert len(worker._regions) == 2
+
+    def test_a_detection_at_exactly_the_overlap_threshold_matches(self, worker):
+        first, second = seg(x=0, width=130), seg(x=70, width=130)
+        # intersection 60, union 200: an IoU of exactly 0.30
+        assert translation_worker._iou(first.bbox, second.bbox) == IOU_THRESHOLD
+        worker._update([first])
+        worker._update([second])
+        assert len(worker._regions) == 1
+
+    @pytest.mark.parametrize(
+        "new_text, same_line",
+        [
+            ("abcdeg", True),  # nearly the same text: similarity 0.83
+            ("xyzwuv", False),  # unrelated text: similarity 0
+        ],
+    )
+    def test_at_a_middling_overlap_the_text_decides(self, worker, new_text, same_line):
+        # A match is judged on 0.6 * overlap + 0.4 * text similarity, which has to reach 0.40.
+        # These two boxes have an IoU of 0.50, which on its own gives 0.30.
+        worker._update([seg("abcdef", x=0, width=120)])
+        original = only_region(worker)
+        worker._update([seg(new_text, x=40, width=120)])  # x 40..160: intersection 80 of 160
+
+        assert (len(worker._regions) == 1) is same_line
+        assert (original.miss_count == 0) is same_line
+        assert (original.original_text == new_text) is same_line
+
+    def test_a_nearly_identical_place_matches_even_when_the_text_is_unrelated(self, worker):
+        # An IoU of 0.80 gives 0.48 on its own, enough without any text similarity: the line
+        # was rewritten where it stood.
+        worker._update([seg("abcdef", x=0, width=180)])
+        region = only_region(worker)
+        worker._update([seg("xyzwuv", x=20, width=180)])
+        assert only_region(worker) is region
+        assert region.original_text == "xyzwuv"
 
     def test_a_region_is_claimed_by_at_most_one_detection_per_batch(self, worker):
         worker._update([seg("Some line of text here")])
@@ -250,6 +299,87 @@ class TestMatching:
         old.miss_count = MAX_MISSES
         worker._update([seg()])
         assert only_region(worker) is old and old.miss_count == 0
+
+
+class TestTextChangesInPlace:
+    """A region that is matched again with different text: what its new text is shown as."""
+
+    def test_text_that_becomes_a_number_is_shown_as_it_is(self, worker, translator):
+        worker._update([seg("Hello brave new world")])
+        region = only_region(worker)
+        worker._update([seg("12:45")])
+
+        assert only_region(worker) is region
+        assert region.original_text == "12:45"
+        assert region.translated_text == "12:45"  # not the old translation
+        assert not region.snapshot().has_translation
+        assert translator.translated_texts == ["Hello brave new world"]
+
+    def test_text_that_becomes_target_language_text_is_shown_as_it_is(
+        self, worker, translator, monkeypatch
+    ):
+        worker._update([seg("Hello brave new world")])
+        region = only_region(worker)
+        monkeypatch.setattr(translation_worker, "_already_target", lambda text, to_code: True)
+        worker._update([seg("Bonjour tout le monde")])
+
+        assert region.translated_text == "Bonjour tout le monde"
+        assert translator.translated_texts == ["Hello brave new world"]
+
+    def test_a_same_language_pair_never_translates_a_change(self, worker, translator):
+        worker.set_languages("fr", "fr")
+        worker._update([seg("Bonjour tout le monde")])
+        region = only_region(worker)
+        worker._update([seg("Au revoir tout le monde")])
+
+        assert region.translated_text == "Au revoir tout le monde"
+        assert translator.calls == []
+
+
+class TestTranslatorAnswers:
+    @pytest.mark.parametrize("answer", ["", "   ", "\n", None])
+    def test_a_blank_answer_keeps_the_original_text(self, worker, translator, answer):
+        translator.answers[SENTENCE] = answer
+        worker._update([seg()])
+        assert only_region(worker).translated_text == SENTENCE
+
+    def test_whitespace_around_an_answer_is_trimmed(self, worker, translator):
+        translator.answers[SENTENCE] = "  Bonjour tout le monde \n"
+        worker._update([seg()])
+        assert only_region(worker).translated_text == "Bonjour tout le monde"
+
+    def test_a_translator_that_raises_leaves_the_original_text_on_screen(
+        self, worker, translator, caplog
+    ):
+        translator.error = RuntimeError("out of memory")
+        with caplog.at_level(logging.ERROR):
+            worker._update([seg()])
+        assert only_region(worker).translated_text == SENTENCE
+        assert any("Translation error" in record.getMessage() for record in caplog.records)
+
+    def test_the_next_batch_after_a_failure_is_translated_normally(self, worker, translator):
+        translator.error = RuntimeError("out of memory")
+        worker._update([seg("First line of text", y=10)])
+        translator.error = None
+        worker._update([seg("Second line of text", y=200)])
+        by_text = {r.original_text: r for r in worker._regions.values()}
+        assert by_text["Second line of text"].translated_text == "[fr] Second line of text"
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "A failed translation is cached as if it were the translation: the worker stores "
+            "the untranslated text, so once the translator works again the same text is still "
+            "shown untranslated, until the language changes or the entry is evicted."
+        ),
+    )
+    def test_a_text_whose_translation_failed_is_tried_again(self, worker, translator):
+        translator.error = RuntimeError("out of memory")
+        worker._update([seg(SENTENCE, y=10)])
+        translator.error = None
+        worker._update([seg(SENTENCE, y=300)])  # the same text, in a new region
+        newest = list(worker._regions.values())[-1]
+        assert newest.translated_text == f"[fr] {SENTENCE}"
 
 
 class TestMissCounting:
