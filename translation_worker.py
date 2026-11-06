@@ -34,7 +34,6 @@ import logging
 import queue
 import re
 import time
-from typing import Optional
 
 from PyQt6.QtCore import QThread
 
@@ -264,7 +263,7 @@ class TranslationWorker(QThread):
         matched_ids: set[str] = set()
 
         # Collect segments that need translation (cache misses)
-        to_translate: list[tuple[str, RawSegment, Optional[TranslationRegion]]] = []
+        to_translate: list[tuple[str, RawSegment, TranslationRegion | None]] = []
 
         for seg in segments:
             # Find best matching existing region (each region may be claimed by
@@ -314,8 +313,8 @@ class TranslationWorker(QThread):
     def _find_match(
         self,
         seg: RawSegment,
-        exclude: Optional[set] = None,
-    ) -> Optional[TranslationRegion]:
+        exclude: set | None = None,
+    ) -> TranslationRegion | None:
         """
         Return the best-matching live region for *seg*, or None.
 
@@ -323,7 +322,7 @@ class TranslationWorker(QThread):
         smoothed_bbox for stability). Among candidates, we pick the one with
         the highest text similarity. Returned only if ≥ TEXT_SIM_THRESHOLD.
         """
-        best: Optional[TranslationRegion] = None
+        best: TranslationRegion | None = None
         best_score: float = -1.0
 
         for reg in self._regions.values():

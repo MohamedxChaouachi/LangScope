@@ -19,7 +19,6 @@ conversion is done relative to a single QScreen.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QGuiApplication, QScreen
@@ -62,7 +61,7 @@ def local_rect_to_native(screen: QScreen, rect: QRect) -> tuple[int, int, int, i
     return top, left, width, height
 
 
-def native_region_to_logical(region: dict) -> tuple[QRect, float, Optional[QScreen]]:
+def native_region_to_logical(region: dict) -> tuple[QRect, float, QScreen | None]:
     """
     Convert a native-pixel region dict ({"top","left","width","height"}) to a
     logical QRect suitable for QWidget.setGeometry().

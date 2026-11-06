@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Optional
 
 import numpy as np
 
@@ -60,11 +59,11 @@ class CaptureManager:
     """
 
     def __init__(self):
-        self.latest_frame: Optional[np.ndarray] = None
+        self.latest_frame: np.ndarray | None = None
         self._region: dict = {"top": 0, "left": 0, "width": 800, "height": 600}
         self._region_lock = threading.Lock()
         self._running: bool = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._dxcam = _try_dxcam()
         self._backend: str = "dxcam" if self._dxcam else "mss"
         log.info(f"[Capture] Backend: {self._backend}")
