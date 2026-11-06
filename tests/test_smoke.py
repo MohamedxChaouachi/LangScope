@@ -17,14 +17,13 @@ import importlib
 import importlib.util
 import pathlib
 import sys
-import traceback
 import types
 
 import numpy as np
 import pytest
-from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QCheckBox, QLabel
 
+from tests.helpers import bbox, render
 from translation_providers import BaseTranslator
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -42,38 +41,6 @@ _NEEDS_ML_PACKAGES = {
 
 def _app_modules() -> list[str]:
     return sorted(p.stem for p in ROOT.glob("*.py") if p.stem not in _NOT_APP_MODULES)
-
-
-def _bbox(x1: int, y1: int, x2: int, y2: int) -> list[list[int]]:
-    """A 4-point bbox (clockwise from top-left), as EasyOCR returns them."""
-    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-
-
-def _render(widget) -> QImage:
-    """Paint the widget into an image, failing the test with the traceback if painting raises.
-
-    When paintEvent raises, PyQt reports the exception through sys.excepthook and Python also
-    stores it in sys.last_*. That keeps the failed paintEvent's frame, and the QPainter still
-    active in it, alive until after the render has finished and its paint device is gone, which
-    makes Qt abort the whole test process ("Cannot destroy paint device that is being painted").
-    So the hook formats the error and drops sys.last_*: the painter then ends while its device
-    still exists, and the test fails normally with the original error.
-    """
-    problems: list[str] = []
-
-    def record(exc_type, exc, tb):
-        problems.append("".join(traceback.format_exception(exc_type, exc, tb)))
-        for name in ("last_type", "last_value", "last_traceback", "last_exc"):
-            if hasattr(sys, name):
-                setattr(sys, name, None)
-
-    previous_hook, sys.excepthook = sys.excepthook, record
-    try:
-        image = widget.grab().toImage()
-    finally:
-        sys.excepthook = previous_hook
-    assert not problems, "paintEvent raised:\n" + "\n".join(problems)
-    return image
 
 
 # ── Imports ──────────────────────────────────────────────────────────────────
@@ -160,16 +127,16 @@ def test_live_feed_paints_translations(qtbot):
     qtbot.addWidget(feed)
     feed.resize(480, 240)
     frame = np.full((120, 240, 3), 200, np.uint8)
-    detection = (_bbox(10, 10, 200, 40), "hello", "bonjour", "r1", 0.9)
+    detection = (bbox(10, 10, 200, 40), "hello", "bonjour", "r1", 0.9)
 
     feed.update_frame(frame, [], 240, 120)
-    without_translation = _render(feed)
+    without_translation = render(feed)
     feed.update_frame(frame, [detection], 240, 120)
-    with_translation = _render(feed)
+    with_translation = render(feed)
     assert with_translation != without_translation
 
     feed.set_debug(True)  # the debug overlay has its own paint path
-    assert not _render(feed).isNull()
+    assert not render(feed).isNull()
 
 
 def test_overlay_window_builds_and_paints_regions(qtbot):
@@ -180,14 +147,14 @@ def test_overlay_window_builds_and_paints_regions(qtbot):
     qtbot.addWidget(overlay)
     capture_rect = {"top": 0, "left": 0, "width": 400, "height": 120}
     region = TranslationRegion(
-        bbox=_bbox(10, 10, 200, 40), original_text="hello", translated_text="bonjour"
+        bbox=bbox(10, 10, 200, 40), original_text="hello", translated_text="bonjour"
     )
 
     overlay.set_active(True)
     overlay.update_regions([], capture_rect)
-    empty = _render(overlay)
+    empty = render(overlay)
     overlay.update_regions([region], capture_rect)
-    painted = _render(overlay)
+    painted = render(overlay)
     assert painted != empty
 
 
@@ -212,7 +179,7 @@ def test_translation_worker_thread_publishes_translated_regions(qtbot, monkeypat
     worker.start()
     try:
         text = "Hello brave new world"
-        worker.enqueue([RawSegment(bbox=_bbox(10, 10, 200, 40), text=text, score=0.9)])
+        worker.enqueue([RawSegment(bbox=bbox(10, 10, 200, 40), text=text, score=0.9)])
         qtbot.waitUntil(lambda: bool(worker.latest_regions), timeout=10_000)
         (region,) = worker.latest_regions
         assert region.original_text == text
