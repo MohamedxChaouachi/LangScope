@@ -1,0 +1,11 @@
+# Tool configuration for LangScope. Packaging metadata is not defined here yet.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# Rule families are enabled one at a time; each is added together with the fixes it needs.
+select = [
+    "F",   # pyflakes: undefined names, unused imports and variables
+]
