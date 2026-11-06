@@ -471,22 +471,14 @@ class ControlPanel(QWidget):
         self._start_btn.clicked.connect(self._toggle)
         row2.addWidget(self._start_btn)
 
-        # Overlay + Debug toggles
-        toggle_row = QHBoxLayout(); toggle_row.setSpacing(16)
-        self._overlay_chk = QCheckBox("🖥  Desktop Overlay")
+        self._overlay_chk = QCheckBox("  Desktop Overlay")
         self._overlay_chk.setObjectName("overlay_chk")
         self._overlay_chk.setCursor(Qt.CursorShape.PointingHandCursor)
         self._overlay_chk.setIcon(qta.icon("fa5s.desktop", color=COLOR_ACCENT_SOFT))
         self._overlay_chk.setIconSize(QSize(16, 16))
         self._overlay_chk.setMinimumWidth(150)
         self._overlay_chk.toggled.connect(self.overlay_toggled.emit)
-        toggle_row.addWidget(self._overlay_chk)
-        self._debug_chk = QCheckBox("🔍  Debug Mode")
-        self._debug_chk.setObjectName("overlay_chk")   # reuse same style
-        self._debug_chk.toggled.connect(self.debug_toggled.emit)
-        toggle_row.addWidget(self._debug_chk)
-        toggle_row.addStretch()
-        root.addLayout(toggle_row)
+        row2.addWidget(self._overlay_chk)
 
         self._debug_chk = QCheckBox("  Debug Mode")
         self._debug_chk.setObjectName("overlay_chk")   # reuse same style
@@ -565,7 +557,7 @@ class ControlPanel(QWidget):
         screen = screen_at_native_point(left + w // 2, top + h // 2)
         n_screens = len(QGuiApplication.screens())
         where = f"Screen {screen_index(screen)}/{n_screens}  " if n_screens > 1 else ""
-        self._region_label.setText(f"📍 {where}({left}, {top})  —  {w} x {h} px")
+        self._region_label.setText(f"{where}({left}, {top})  —  {w} x {h} px")
         self._start_btn.setEnabled(True)
         self.region_changed.emit(top, left, w, h)
         self.activateWindow(); self.raise_()
@@ -602,6 +594,10 @@ class ControlPanel(QWidget):
 
     def set_debug(self, enabled: bool) -> None:
         self._feed.set_debug(enabled)
+        # Stats strip is only visible while Debug Mode is on.
+        self._stats_label.setVisible(enabled)
+        if not enabled:
+            self._stats_label.clear()
 
     def set_status(self, text: str) -> None:
         self._status.setText(text)
