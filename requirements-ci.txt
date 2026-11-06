@@ -1,0 +1,14 @@
+# Lightweight environment for CI and quick local test runs.
+#
+# Contains everything the test suite imports, without the ML stack (torch, easyocr,
+# argostranslate). Tests that need those packages skip themselves with a clear reason.
+# For the full application use requirements.txt instead.
+-r requirements-dev.txt
+
+PyQt6>=6.6.0
+mss>=9.0.1
+numpy>=1.24.0
+langdetect>=1.0.9
+qtawesome>=1.4.2
+# ocr_providers imports cv2; EasyOCR normally brings in the headless build.
+opencv-python-headless

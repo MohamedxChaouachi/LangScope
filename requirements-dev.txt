@@ -1,2 +1,6 @@
-# Development / test dependencies
+# Development and test tooling.
+# Install on top of requirements.txt (full app) or requirements-ci.txt (lightweight, no ML stack).
 pytest>=8.0
+pytest-qt>=4.4
+# ruff's formatter output can change between minor releases, so stay on one minor version.
+ruff~=0.17.4
