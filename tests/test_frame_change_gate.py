@@ -7,6 +7,7 @@ It remembers the last frame that was sent to OCR and compares each new frame wit
 import numpy as np
 import pytest
 
+import ocr_worker
 from ocr_worker import FrameChangeGate
 from tests.test_change_detection import MIN_CHANGED_PX, PIXEL_DELTA, blank, change_pixels
 
@@ -30,6 +31,19 @@ class TestDecisions:
         # The capture thread produces a new array on every grab.
         gate.should_ocr(blank())
         assert gate.should_ocr(blank()) is False
+
+    def test_an_identical_frame_is_not_compared_pixel_by_pixel(self, gate, monkeypatch):
+        # The hash is the cheap check and comes first; most grabs of a static screen end there.
+        compared = []
+        monkeypatch.setattr(
+            ocr_worker, "_content_changed", lambda frame, prev: compared.append(1) or True
+        )
+        gate.should_ocr(blank())  # nothing to compare with yet
+        gate.should_ocr(blank())
+        gate.should_ocr(blank())
+        assert compared == []
+        assert gate.should_ocr(blank(50)) is True  # a different hash is compared
+        assert compared == [1]
 
     def test_a_tiny_change_is_skipped(self, gate):
         base = blank()
@@ -85,7 +99,11 @@ class TestReferenceFrame:
         frame = blank()
         gate.should_ocr(frame)
         frame[:] = 255  # overwritten in place after the gate has seen it
-        assert gate.should_ocr(blank()) is False  # still compared with the original contents
+        # A frame that differs from the original by too little to matter, but not from the
+        # overwritten buffer. Its hash differs from the original's, so it is compared pixel by
+        # pixel with the reference, which must still hold the original contents.
+        almost = change_pixels(blank(), MIN_CHANGED_PX - 1, 100)
+        assert gate.should_ocr(almost) is False
 
 
 class TestReset:
