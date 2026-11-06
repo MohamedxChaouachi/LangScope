@@ -23,8 +23,8 @@ import logging
 import os
 import pathlib
 import re
-import time
 import threading
+import time
 from typing import Any
 
 log = logging.getLogger("langscope.translator")
@@ -85,7 +85,6 @@ import argostranslate.translate
 
 # pyrefly: ignore [missing-import]
 import ctranslate2
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Translation cache  (Goal 1)

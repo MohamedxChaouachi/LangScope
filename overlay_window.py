@@ -14,9 +14,8 @@ Update content via OverlayWindow.update_regions(regions, region_rect).
 from __future__ import annotations
 
 import numpy as np
-
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPainter, QPaintEvent, QKeyEvent
+from PyQt6.QtGui import QKeyEvent, QPainter, QPaintEvent
 from PyQt6.QtWidgets import QWidget
 
 from models import TranslationRegion

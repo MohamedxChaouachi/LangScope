@@ -4,9 +4,10 @@ No project-level dependencies — safe to import from any module.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import time
 import uuid
+from dataclasses import dataclass, field
 
 
 @dataclass

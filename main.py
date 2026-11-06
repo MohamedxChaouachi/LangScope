@@ -14,17 +14,16 @@ import logging
 import os
 import sys
 
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 import translator
-from ui import ControlPanel, APP_ICON_PATH
 from capture_manager import CaptureManager
 from ocr_worker import OCRWorker
-from translation_worker import TranslationWorker
 from overlay_window import OverlayWindow
-
+from translation_worker import TranslationWorker
+from ui import APP_ICON_PATH, ControlPanel
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PackageSetupThread  (unchanged from original)

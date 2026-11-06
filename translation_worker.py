@@ -38,7 +38,7 @@ import time
 from PyQt6.QtCore import QThread
 
 from models import RawSegment, TranslationRegion
-from translation_providers import BaseTranslator, ArgosTranslator
+from translation_providers import ArgosTranslator, BaseTranslator
 
 log = logging.getLogger("langscope.translation_worker")
 

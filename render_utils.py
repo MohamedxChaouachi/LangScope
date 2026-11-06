@@ -17,7 +17,7 @@ No project-level dependencies beyond PyQt6 — safe to import from any UI module
 
 from __future__ import annotations
 
-from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 
 # Default appearance constants (previously duplicated inline in both widgets).
 _BG_COLOR = QColor(10, 12, 30, 235)

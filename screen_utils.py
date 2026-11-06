@@ -19,7 +19,6 @@ conversion is done relative to a single QScreen.
 
 from __future__ import annotations
 
-
 from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QGuiApplication, QScreen
 

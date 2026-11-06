@@ -11,7 +11,7 @@ numpy (used internally by _iou) and difflib/re from the stdlib.
 
 import pytest
 
-from translation_worker import _iou, _text_sim, _numeric, _TIMESTAMP_RE
+from translation_worker import _TIMESTAMP_RE, _iou, _numeric, _text_sim
 
 
 def _square(x1, y1, x2, y2):
