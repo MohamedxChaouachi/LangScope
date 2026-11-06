@@ -4,8 +4,6 @@ is not installed yet that cannot succeed, so it backs off instead of retrying ev
 tries again straight away when told that the pack has finished installing.
 """
 
-import time
-
 import pytest
 
 import translation_worker
@@ -24,21 +22,6 @@ class WarmUpTranslator(BaseTranslator):
     def warm_up(self, from_code, to_code):
         self.attempts.append((from_code, to_code))
         return self.ready
-
-
-class FakeClock:
-    def __init__(self):
-        self.now = 1000.0
-
-    def __call__(self):
-        return self.now
-
-
-@pytest.fixture
-def clock(monkeypatch):
-    fake = FakeClock()
-    monkeypatch.setattr(time, "monotonic", fake)
-    return fake
 
 
 @pytest.fixture
