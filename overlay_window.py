@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeyEvent, QPainter, QPaintEvent
+from PyQt6.QtGui import QPainter, QPaintEvent
 from PyQt6.QtWidgets import QWidget
 
 from models import TranslationRegion
@@ -104,7 +104,9 @@ class OverlayWindow(QWidget):
             if not reg.has_translation:
                 continue
 
-            pts = np.array(reg.bbox, dtype=float)
+            # smoothed_bbox follows the text and is damped against OCR jitter; bbox is only
+            # where the region was first seen and is never updated.
+            pts = np.array(reg.smoothed_bbox, dtype=float)
             x1 = int(pts[:, 0].min())
             y1 = int(pts[:, 1].min())
             x2 = int(pts[:, 0].max())
@@ -125,9 +127,3 @@ class OverlayWindow(QWidget):
                 H,
                 max_font_pt=24,
             )
-
-    def keyPressEvent(self, e: QKeyEvent) -> None:
-        if e.key() == Qt.Key.Key_Escape:
-            self.set_active(False)
-        else:
-            super().keyPressEvent(e)
