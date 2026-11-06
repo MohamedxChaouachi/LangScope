@@ -9,12 +9,8 @@ Package cache:
   that get_installed_packages() reliably finds already-downloaded models and
   never triggers a spurious re-download.
 
-Optimizations added (Phase 1):
-  • Translation cache — identical (text, from, to) tuples are never sent to
-    Argos twice.  Cache is bounded to _CACHE_MAX entries and flushed on
-    language-pair change.  Expected gain: eliminates 100% of repeated
-    translation calls on static or slowly-changing screens.
-  • Structured logging — DEBUG-level hits/misses, timing, and errors.
+Caching is not done here: TranslationWorker keeps the one (bounded) translation cache, above
+the BaseTranslator interface, so every engine benefits and nothing is cached twice.
 """
 
 from __future__ import annotations
@@ -25,7 +21,6 @@ import pathlib
 import re
 import threading
 import time
-from typing import Any
 
 log = logging.getLogger("langscope.translator")
 
@@ -87,67 +82,7 @@ import argostranslate.translate
 import ctranslate2
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Translation cache  (Goal 1)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Maximum number of (text, from_code, to_code) → translated entries to keep.
-# Older entries are evicted in FIFO order when the limit is reached.
-_CACHE_MAX = 512
-
-# The cache itself: key = (text, from_code, to_code), value = translated str.
-_translation_cache: dict[tuple[str, str, str], str] = {}
-
-# Insertion-order list used for O(1) FIFO eviction.
-_cache_order: list[tuple[str, str, str]] = []
-
-# Thread-safe access — translate_text may be called from the capture thread
-# while clear_translation_cache is called from the main thread.
-_cache_lock = threading.Lock()
-
-# Lifetime counters for debugging / metrics.
-_cache_hits: int = 0
-_cache_misses: int = 0
-
-
-def _cache_put(key: tuple[str, str, str], value: str) -> None:
-    """Insert *key→value* into the cache, evicting the oldest entry if full.
-    Must be called while holding *_cache_lock*."""
-    global _translation_cache, _cache_order
-    if len(_translation_cache) >= _CACHE_MAX:
-        oldest = _cache_order.pop(0)
-        _translation_cache.pop(oldest, None)
-    _translation_cache[key] = value
-    _cache_order.append(key)
-
-
-def clear_translation_cache() -> None:
-    """Flush the entire translation cache.
-
-    Should be called whenever the source or target language changes so that
-    cached translations for the old pair are not accidentally reused.
-    """
-    global _translation_cache, _cache_order, _cache_hits, _cache_misses
-    with _cache_lock:
-        _translation_cache.clear()
-        _cache_order.clear()
-        _cache_hits = 0
-        _cache_misses = 0
-    log.debug("[Translator] Translation cache cleared.")
-
-
-def get_cache_stats() -> dict[str, Any]:
-    """Return a snapshot of translation-cache statistics for debugging/metrics."""
-    with _cache_lock:
-        return {
-            "size": len(_translation_cache),
-            "hits": _cache_hits,
-            "misses": _cache_misses,
-            "max": _CACHE_MAX,
-        }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Cache helpers
+# Installed language packs
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -286,12 +221,7 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
 def translate_text(text: str, from_code: str, to_code: str) -> str:
     """
     Translate *text* from *from_code* to *to_code* using the locally cached
-    Argos Translate model.
-
-    Cache behaviour:
-      • On a cache HIT  the translated string is returned instantly (no Argos
-        call, no CPU/GPU cost).
-      • On a cache MISS the result is translated, stored, and returned.
+    Argos Translate model. Results are not cached here; TranslationWorker does that.
 
     Uses the explicit installed-languages API instead of the convenience
     wrapper, which can silently return None when duplicate package entries
@@ -299,39 +229,12 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
 
     Returns the translated string, or the original *text* on failure.
     """
-    global _cache_hits, _cache_misses
-
     if not text.strip():
         return text
 
     if from_code == to_code:
         return text  # nothing to translate
 
-    cache_key = (text, from_code, to_code)
-
-    # ── Cache lookup ───────────────────────────────────────────────────────
-    with _cache_lock:
-        if cache_key in _translation_cache:
-            _cache_hits += 1
-            log.debug(
-                "[Translator] CACHE HIT  (%s→%s) hits=%d misses=%d  %r",
-                from_code,
-                to_code,
-                _cache_hits,
-                _cache_misses,
-                text[:40],
-            )
-            return _translation_cache[cache_key]
-        _cache_misses += 1
-
-    log.debug(
-        "[Translator] CACHE MISS (%s→%s) hits=%d misses=%d  %r",
-        from_code,
-        to_code,
-        _cache_hits,
-        _cache_misses,
-        text[:40],
-    )
     log.debug(f"[Translator] Translating ({from_code}->{to_code}): {text[:50]!r}")
 
     # ── Argos Translate call ───────────────────────────────────────────────
@@ -373,13 +276,7 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
         )
         log.debug(f"[Translator] OK Result: {result[:50]!r}")
 
-        final = result.strip() if result and result.strip() else text
-
-        # ── Store in cache ─────────────────────────────────────────────────
-        with _cache_lock:
-            _cache_put(cache_key, final)
-
-        return final
+        return result.strip() if result and result.strip() else text
 
     except Exception as exc:
         log.error(f"[Translator] ERR Exception ({from_code}->{to_code}): {exc}")
@@ -518,12 +415,10 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
     """
     Translate several independent strings with a single batched model call.
 
-    Returns a list aligned 1:1 with *texts*. Cached results are reused, blank
-    strings and same-language requests pass through unchanged, and any failure
-    returns the original text for the affected entries.
+    Returns a list aligned 1:1 with *texts*. Identical strings are translated
+    once, blank strings and same-language requests pass through unchanged, and
+    any failure returns the original text for the affected entries.
     """
-    global _cache_hits, _cache_misses
-
     results: list[str | None] = [None] * len(texts)
     pending: dict[str, list[int]] = {}  # unique text -> indices to fill
 
@@ -531,13 +426,6 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
         if not text.strip() or from_code == to_code:
             results[i] = text
             continue
-        with _cache_lock:
-            cached = _translation_cache.get((text, from_code, to_code))
-            if cached is not None:
-                _cache_hits += 1
-                results[i] = cached
-                continue
-            _cache_misses += 1
         pending.setdefault(text, []).append(i)
 
     if pending:
@@ -560,10 +448,6 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
             (time.perf_counter() - t0) * 1000,
         )
 
-        with _cache_lock:
-            for text, tx in zip(unique, translated):
-                if tx and tx != text:
-                    _cache_put((text, from_code, to_code), tx)
         for text, tx in zip(unique, translated):
             for i in pending[text]:
                 results[i] = tx

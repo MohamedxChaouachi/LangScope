@@ -2,7 +2,7 @@
 translation_providers.py — Translation abstraction layer.
 
 BaseTranslator defines the interface.
-ArgosTranslator wraps translator.py (offline Argos Translate + FIFO cache).
+ArgosTranslator wraps translator.py (offline Argos Translate).
 Future engines (CTranslate2, DeepL…) implement BaseTranslator without touching
 any other module.
 """
@@ -51,8 +51,3 @@ class ArgosTranslator(BaseTranslator):
         import translator as _t
 
         return _t.preload_model(from_code, to_code)
-
-    def clear_cache(self) -> None:
-        import translator as _t
-
-        _t.clear_translation_cache()

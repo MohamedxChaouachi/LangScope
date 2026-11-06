@@ -34,7 +34,7 @@ import logging
 import re
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 
 from PyQt6.QtCore import QThread
 
@@ -53,6 +53,7 @@ IOU_THRESHOLD = 0.30  # minimum bbox overlap to consider a match
 TEXT_SIM_THRESHOLD = 0.55  # minimum text similarity to accept a match
 EMA_ALPHA = 0.35  # bbox smoothing strength (0=frozen, 1=no smoothing)
 MAX_PENDING_BATCHES = 2  # OCR batches kept while the worker is busy; the oldest is dropped
+TX_CACHE_MAX = 512  # translated texts remembered; the least recently used is dropped
 
 # ── Text filters ──────────────────────────────────────────────────────────────
 _MIN_ALPHA = 3
@@ -185,6 +186,46 @@ class _Mailbox:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Translation cache
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _TranslationCache:
+    """
+    A bounded text-hash → translated-text cache that drops the least recently used entry.
+
+    OrderedDict keeps entries in use order, so a hit (move_to_end) and an eviction
+    (popitem(last=False)) are both O(1). It belongs to the worker thread alone, so it needs
+    no lock. The limit is read from TX_CACHE_MAX on each insert.
+    """
+
+    def __init__(self) -> None:
+        self._entries: OrderedDict[str, str] = OrderedDict()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._entries
+
+    def get(self, key: str) -> str | None:
+        """The cached translation, marking it as recently used; None if there isn't one."""
+        if key not in self._entries:
+            return None
+        self._entries.move_to_end(key)
+        return self._entries[key]
+
+    def put(self, key: str, value: str) -> None:
+        self._entries[key] = value
+        self._entries.move_to_end(key)
+        while len(self._entries) > TX_CACHE_MAX:
+            self._entries.popitem(last=False)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TranslationWorker
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -218,8 +259,8 @@ class TranslationWorker(QThread):
         # Active tracked regions — keyed by region_id
         self._regions: dict[str, TranslationRegion] = {}
 
-        # text-hash → translated string cache
-        self._tx_cache: dict[str, str] = {}
+        # text-hash → translated string cache (bounded, least recently used out first)
+        self._tx_cache = _TranslationCache()
 
         # Latest snapshot for the render timer. Replaced as a whole (an atomic assignment) and
         # never modified, so readers on other threads need no lock.
@@ -430,8 +471,9 @@ class TranslationWorker(QThread):
         # Deduplicate by hash so identical texts aren't sent twice
         unique: dict[str, list[TranslationRegion]] = {}
         for h, _seg, reg in items:
-            if h in self._tx_cache:
-                reg.translated_text = self._tx_cache[h]
+            cached = self._tx_cache.get(h)
+            if cached is not None:
+                reg.translated_text = cached
                 self.cache_hits += 1
             else:
                 unique.setdefault(h, [])
@@ -462,7 +504,7 @@ class TranslationWorker(QThread):
 
         for h, original, tx in zip(hash_order, texts, translated):
             tx = (tx or "").strip() or original
-            self._tx_cache[h] = tx
+            self._tx_cache.put(h, tx)
             for reg in unique[h]:
                 reg.translated_text = tx
 
