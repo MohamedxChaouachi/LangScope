@@ -329,7 +329,9 @@ class LiveFeedWidget(QWidget):
         self._orig_h = max(1, orig_h)
         rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
         qimg = QImage(rgb.data, orig_w, orig_h, orig_w * 3, QImage.Format.Format_RGB888)
-        self._pixmap = QPixmap.fromImage(qimg.copy())
+        # fromImage copies the pixels into the pixmap, so the QImage (which only wraps the
+        # numpy buffer) needs no copy of its own first.
+        self._pixmap = QPixmap.fromImage(qimg)
         self.update()
 
     def paintEvent(self, _: QPaintEvent) -> None:

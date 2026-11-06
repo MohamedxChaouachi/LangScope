@@ -22,6 +22,7 @@ import translator
 from capture_manager import CaptureManager
 from ocr_worker import OCRWorker
 from overlay_window import OverlayWindow
+from render_gate import RenderGate
 from translation_worker import TranslationWorker
 from ui import APP_ICON_PATH, ControlPanel
 
@@ -83,36 +84,30 @@ if __name__ == "__main__":
 
     # ── Render timer (60 FPS) ─────────────────────────────────────────────────
     _capture_region: dict = {"top": 100, "left": 100, "width": 500, "height": 200}
-    _fps_counter = {"frames": 0, "t0": 0.0}
+    render_gate = RenderGate()
 
     def _render_tick() -> None:
         frame = capture_mgr.latest_frame
-        if frame is None:
-            return
-        h, w = frame.shape[:2]
         regs = tx_worker.latest_regions
+        tick = render_gate.tick(frame, regs)
 
-        # Convert TranslationRegion list → 5-tuple for LiveFeedWidget
-        # (bbox=smoothed, original, translated, region_id, confidence)
-        detections = [
-            (r.smoothed_bbox, r.original_text, r.translated_text, r.region_id, r.confidence)
-            for r in regs
-        ]
-        panel.update_live_feed(frame, detections, w, h)
+        # Converting and copying a full frame is only worth doing for a frame (or a set of
+        # regions) the UI hasn't been given yet.
+        if tick.render:
+            h, w = frame.shape[:2]
+            # Convert the region snapshots → 5-tuples for LiveFeedWidget
+            # (bbox=smoothed, original, translated, region_id, confidence)
+            detections = [
+                (r.smoothed_bbox, r.original_text, r.translated_text, r.region_id, r.confidence)
+                for r in regs
+            ]
+            panel.update_live_feed(frame, detections, w, h)
 
-        # Update overlay if active
-        overlay.update_regions(regs, _capture_region)
+            # Update overlay if active
+            overlay.update_regions(regs, _capture_region)
 
-        # FPS counter
-        import time
-
-        _fps_counter["frames"] += 1
-        now = time.perf_counter()
-        if now - _fps_counter["t0"] >= 1.0:
-            fps = _fps_counter["frames"] / (now - _fps_counter["t0"])
-            panel.set_fps(fps)
-            _fps_counter["frames"] = 0
-            _fps_counter["t0"] = now
+        if tick.fps is not None:
+            panel.set_fps(tick.fps)
 
             # Debug stats — read straight off the workers, same as FPS above.
             # ControlPanel only shows the strip while Debug Mode is checked.
@@ -189,6 +184,9 @@ if __name__ == "__main__":
 
     def on_overlay_toggled(active: bool) -> None:
         overlay.set_active(active)
+        # A static screen produces no new frames, so without this the overlay would stay blank
+        # until something changed.
+        render_gate.invalidate()
 
     panel.overlay_toggled.connect(on_overlay_toggled)
 
