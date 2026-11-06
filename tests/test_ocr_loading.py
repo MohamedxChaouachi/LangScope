@@ -87,8 +87,11 @@ class TestOcrWorkerLoading:
         qtbot.waitUntil(lambda: len(ocr.load_calls) == 1, timeout=5000)
 
         worker.set_languages("fr", "en")  # from the GUI thread
-        qtbot.waitUntil(lambda: len(ocr.load_calls) == 2, timeout=5000)
+        # Signals reach the GUI thread through its event loop, so wait for the status itself,
+        # not just for the load call that precedes it.
+        qtbot.waitUntil(lambda: sum("ready" in s for s in statuses) == 2, timeout=5000)
 
+        assert len(ocr.load_calls) == 2
         assert ocr.language_calls[-1][0] == "fr"
         assert all(thread != MAIN_THREAD for _, thread in ocr.language_calls)
         assert all(thread != MAIN_THREAD for thread in ocr.load_calls)
