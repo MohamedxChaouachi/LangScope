@@ -48,7 +48,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements-ci.txt
+          # requirements-ci.txt includes requirements-dev.txt, so key the cache on both.
+          cache-dependency-path: |
+            requirements-ci.txt
+            requirements-dev.txt
       # Deliberately not requirements.txt: CI does not install torch, easyocr or argostranslate.
       # Tests that need them skip themselves, and -ra (set in pyproject.toml) lists each skip
       # with its reason.
