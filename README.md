@@ -1,5 +1,7 @@
 # LangScope
 
+[![CI](https://github.com/MohamedxChaouachi/LangScope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/MohamedxChaouachi/LangScope/actions/workflows/ci.yml)
+
 Offline live screen translator built with Python and PyQt6.
 
 LangScope continuously captures a region of your screen, runs OCR on it when the content changes, translates the detected text locally with Argos Translate, and draws the translation in place over the original text. It can render inside the app window or as a click-through overlay directly on your desktop.
@@ -139,8 +141,11 @@ LangScope/
 ├── bench_ocr.py             # OCR benchmark harness
 ├── assets/                  # App icon and UI images
 ├── tests/                   # pytest suite
-├── requirements.txt
-└── requirements-dev.txt
+├── .github/workflows/       # CI: ruff and pytest on every push and pull request
+├── pyproject.toml           # ruff and pytest configuration
+├── requirements.txt         # runtime dependencies
+├── requirements-dev.txt     # test and lint tooling
+└── requirements-ci.txt      # lightweight set used by CI (no torch, easyocr or argostranslate)
 ```
 
 `BaseOCR` and `BaseTranslator` are the extension points: add a new engine by implementing the interface, without touching the rest of the pipeline.
@@ -167,11 +172,20 @@ OpenCV (`cv2`) is used for preprocessing and is installed as a dependency of Eas
 ## Testing
 
 ```bash
-pip install -r requirements-dev.txt
+# Full environment (after installing PyTorch as described above)
+pip install -r requirements.txt -r requirements-dev.txt
+
+# Or the lightweight set CI uses, without torch, easyocr or argostranslate
+pip install -r requirements-ci.txt
+
+ruff check .
+ruff format --check .
 pytest
 ```
 
-The tests cover bounding-box IoU, text similarity, text filters, bbox smoothing and the region data model.
+The tests cover bounding-box IoU, text similarity, text filters, bbox smoothing and the region data model. Smoke tests import every module and build and paint the Qt widgets offscreen, so they need no display. Tests that need argostranslate skip themselves, with a reason, when it is not installed; `pytest` lists each skip.
+
+CI runs `ruff` and `pytest` on every push and pull request (`.github/workflows/ci.yml`).
 
 ---
 
