@@ -95,7 +95,17 @@ _OCR_BATCH_SIZE: int = 16 if _USE_GPU else 1
 def preprocess(frame: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
     """
     Apply the configured preprocessing pipeline to *frame* (BGR numpy array).
-    Returns a BGR array suitable for EasyOCR (which accepts both gray and BGR).
+    Returns an array suitable for EasyOCR (grayscale 1-channel when
+    cfg.grayscale is on, BGR 3-channel otherwise — EasyOCR accepts both).
+
+    Perf note (fixed): the previous version converted BGR→gray→BGR (undoing
+    the grayscale conversion it just did) so CLAHE could run through a BGR→
+    LAB→BGR round trip. That's three colour-space conversions to end up
+    back in 3-channel BGR containing only grayscale information. When
+    cfg.grayscale is on, we now stay in single-channel the whole way through
+    — CLAHE runs directly on the gray plane instead of on a LAB L-channel —
+    which removes 2 of those 3 conversions and roughly halves the memory
+    EasyOCR has to read for the same visual result.
     """
     img = frame.copy()
 
@@ -108,12 +118,21 @@ def preprocess(frame: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
             interpolation=cv2.INTER_LINEAR,
         )
 
-    # 2. Grayscale → back to 3-channel BGR
     if cfg.grayscale:
+        # Stay single-channel for the rest of the pipeline.
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        img  = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-    # 3. CLAHE contrast enhancement (on L channel of LAB)
+        if cfg.clahe_contrast:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray  = clahe.apply(gray)
+
+        if cfg.sharpen:
+            blur = cv2.GaussianBlur(gray, (0, 0), sigmaX=2.0)
+            gray = cv2.addWeighted(gray, 1.5, blur, -0.5, 0)
+
+        return gray
+
+    # Colour path (only used when cfg.grayscale is explicitly disabled).
     if cfg.clahe_contrast:
         lab  = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
@@ -121,10 +140,9 @@ def preprocess(frame: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
         l     = clahe.apply(l)
         img   = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
-    # 4. Unsharp-mask sharpening
     if cfg.sharpen:
-        blur    = cv2.GaussianBlur(img, (0, 0), sigmaX=2.0)
-        img     = cv2.addWeighted(img, 1.5, blur, -0.5, 0)
+        blur = cv2.GaussianBlur(img, (0, 0), sigmaX=2.0)
+        img  = cv2.addWeighted(img, 1.5, blur, -0.5, 0)
 
     return img
 
