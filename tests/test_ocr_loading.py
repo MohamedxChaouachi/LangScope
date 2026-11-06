@@ -124,6 +124,15 @@ class TestOcrWorkerLoading:
         worker.set_languages("en", "de")  # same OCR language, different target
         qtbot.waitUntil(lambda: ocr.read_calls == 2, timeout=5000)
 
+    def test_unchanged_frames_are_counted_as_skipped(self, qtbot, started):
+        ocr = FakeOCR()
+        capture = FakeCapture()
+        capture.latest_frame = np.full((40, 40, 3), 200, np.uint8)
+        worker, _ = started(ocr, capture)
+        worker.start()
+        qtbot.waitUntil(lambda: worker.frames_skipped >= 3, timeout=5000)
+        assert ocr.read_calls == 1 and worker.ocr_calls == 1
+
     def test_a_failed_load_is_reported_and_ocr_is_not_attempted(self, qtbot, started):
         ocr = FakeOCR(fail_load=True)
         capture = FakeCapture()

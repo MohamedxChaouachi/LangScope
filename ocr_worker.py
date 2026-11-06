@@ -48,6 +48,43 @@ def _content_changed(frame: np.ndarray, prev: np.ndarray) -> bool:
     return int(np.count_nonzero(changed)) >= MIN_CHANGED_PX
 
 
+class FrameChangeGate:
+    """
+    Decides whether a captured frame is worth running OCR on.
+
+    It remembers the last frame that was sent to OCR and compares each new frame with that one,
+    not with the previous frame, so many tiny changes add up instead of slipping through. Two
+    checks, cheapest first: an identical hash means nothing changed; otherwise, unless the frame
+    has a new size, enough pixels must have changed noticeably (see _content_changed).
+    """
+
+    def __init__(self) -> None:
+        self._last_hash = ""
+        self._last_frame: np.ndarray | None = None
+
+    def reset(self) -> None:
+        """Forget the reference, so the next frame is always OCR'd."""
+        self._last_hash = ""
+        self._last_frame = None
+
+    def should_ocr(self, frame: np.ndarray) -> bool:
+        """True if *frame* should go to OCR, in which case it becomes the new reference."""
+        fhash = _hash_frame(frame)
+
+        # Check 1: identical hash → skip
+        if fhash == self._last_hash:
+            return False
+
+        # Check 2: nothing meaningful changed → skip
+        if self._last_frame is not None and self._last_frame.shape == frame.shape:
+            if not _content_changed(frame, self._last_frame):
+                return False
+
+        self._last_hash = fhash
+        self._last_frame = frame.copy()  # the capture thread may reuse the buffer
+        return True
+
+
 _NOT_LOADED = object()  # "no language has been loaded yet" (None is a real choice: the default)
 
 
@@ -77,8 +114,7 @@ class OCRWorker(QThread):
         # Written by the GUI thread only (plain assignments); read by the worker.
         self._wanted_language: str | None = None
         self._language_requests = 0  # counts set_languages() calls, even repeats of a language
-        self._last_hash = ""
-        self._last_frame: np.ndarray | None = None
+        self._gate = FrameChangeGate()
 
         # Exposed metrics
         self.ocr_ms = 0.0
@@ -130,8 +166,7 @@ class OCRWorker(QThread):
         log.debug("OCRWorker started (%.0f FPS)", OCR_FPS)
         # Forget the previous region's frame so the first frame after a restart
         # is always OCR'd, even if the screen content hasn't changed.
-        self._last_hash = ""
-        self._last_frame = None
+        self._gate.reset()
         loaded_language: object = _NOT_LOADED
         model_ready = False
         seen_requests = self._language_requests
@@ -144,8 +179,7 @@ class OCRWorker(QThread):
             requests = self._language_requests
             if requests != seen_requests:
                 seen_requests = requests
-                self._last_hash = ""
-                self._last_frame = None
+                self._gate.reset()
 
             # Load the model for the wanted language. A failure is not retried on every pass:
             # it stays failed until the language changes or the worker is restarted.
@@ -153,8 +187,7 @@ class OCRWorker(QThread):
             if wanted != loaded_language:
                 loaded_language = wanted
                 model_ready = self._load_model(wanted)
-                self._last_hash = ""  # the new model must see the current frame again
-                self._last_frame = None
+                self._gate.reset()  # the new model must see the current frame again
             if not model_ready:
                 self._stop_requested.wait(OCR_INTERVAL)
                 continue
@@ -165,23 +198,10 @@ class OCRWorker(QThread):
                 self._stop_requested.wait(OCR_INTERVAL)
                 continue
 
-            fhash = _hash_frame(frame)
-
-            # Gate 1: identical hash → skip
-            if fhash == self._last_hash:
+            if not self._gate.should_ocr(frame):
                 self.frames_skipped += 1
                 self._sleep(t0)
                 continue
-
-            # Gate 2: nothing meaningful changed → skip
-            if self._last_frame is not None and self._last_frame.shape == frame.shape:
-                if not _content_changed(frame, self._last_frame):
-                    self.frames_skipped += 1
-                    self._sleep(t0)
-                    continue
-
-            self._last_hash = fhash
-            self._last_frame = frame.copy()
 
             try:
                 t_ocr = time.perf_counter()
