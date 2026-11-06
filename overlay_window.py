@@ -19,6 +19,7 @@ from PyQt6.QtGui   import QPainter, QPaintEvent, QKeyEvent
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from models import TranslationRegion
+from render_utils import draw_translated_text
 from screen_utils import native_region_to_logical
 
 
