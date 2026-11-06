@@ -104,8 +104,7 @@ class CaptureManager:
         try:
             camera = self._dxcam.create(output_color="BGR")
         except Exception as exc:
-            log.warning(f"[Capture] DXCam init failed ({exc}) — switching to MSS.")
-            log.warning("DXCam init failed: %s", exc)
+            log.warning("[Capture] DXCam init failed (%s) — switching to MSS.", exc)
             self._backend = "mss"
             self._loop_mss()
             return
@@ -115,6 +114,7 @@ class CaptureManager:
         # regions inside it. Regions on any other monitor are grabbed with MSS,
         # which works in global virtual-desktop coordinates.
         sct = None
+        fall_back = False
         try:
             from mss import mss as _mss
 
@@ -146,20 +146,24 @@ class CaptureManager:
                     self.latest_frame = frame
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))
         except Exception as exc:
-            log.error(f"[Capture] DXCam error ({exc}) — switching to MSS.")
-            log.exception("DXCam error: %s", exc)
+            log.exception("[Capture] DXCam error (%s) — switching to MSS.", exc)
             self._backend = "mss"
-            self._loop_mss()
+            fall_back = True
         finally:
             if sct is not None:
                 try:
                     sct.close()
                 except Exception:
                     pass
+            # Release the DXGI duplication explicitly. `del camera` only drops this name, and
+            # dxcam keeps its own reference to the instance, so nothing would be freed.
             try:
-                del camera
-            except Exception:
-                pass
+                camera.release()
+            except Exception as exc:
+                log.debug("[Capture] DXCam release failed (%s)", exc, exc_info=True)
+        # Only now, with the camera let go, switch backends.
+        if fall_back:
+            self._loop_mss()
 
     def _loop_mss(self) -> None:
         from mss import mss as _mss
