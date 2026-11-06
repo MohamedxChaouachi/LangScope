@@ -7,5 +7,15 @@ line-length = 100
 [tool.ruff.lint]
 # Rule families are enabled one at a time; each is added together with the fixes it needs.
 select = [
+    "E4",  # pycodestyle: import errors
+    "E7",  # pycodestyle: statement errors (semicolons, ambiguous names, lambdas, bare except)
+    "E9",  # pycodestyle: syntax and I/O errors
+    "W",   # pycodestyle: whitespace and escape-sequence warnings
     "F",   # pyflakes: undefined names, unused imports and variables
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# translator.py pins argostranslate's data directory and chooses the inference device before it
+# imports the remaining argostranslate submodules and ctranslate2, so those imports must come
+# after executable code.
+"translator.py" = ["E402"]

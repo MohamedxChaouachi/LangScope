@@ -150,10 +150,10 @@ def preprocess(frame: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
     # Colour path (only used when cfg.grayscale is explicitly disabled).
     if cfg.clahe_contrast:
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
+        lum, a, b = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+        lum = clahe.apply(lum)
+        img = cv2.cvtColor(cv2.merge([lum, a, b]), cv2.COLOR_LAB2BGR)
 
     if cfg.sharpen:
         blur = cv2.GaussianBlur(img, (0, 0), sigmaX=2.0)

@@ -297,13 +297,13 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
                 seen.add(lang.code)
                 unique_langs.append(lang)
 
-        from_lang = next((l for l in unique_langs if l.code == from_code), None)
-        to_lang = next((l for l in unique_langs if l.code == to_code), None)
+        from_lang = next((lang for lang in unique_langs if lang.code == from_code), None)
+        to_lang = next((lang for lang in unique_langs if lang.code == to_code), None)
 
         if from_lang is None or to_lang is None:
             log.warning(
                 f"[Translator] ⚠  Language not found — from={from_lang}, to={to_lang}. "
-                f"Available: {[l.code for l in unique_langs]}"
+                f"Available: {[lang.code for lang in unique_langs]}"
             )
             return text
 
@@ -357,8 +357,8 @@ _model_load_lock = threading.Lock()
 def _get_translation(from_code: str, to_code: str):
     """Return Argos' ITranslation for the pair, or None if unavailable."""
     installed = argostranslate.translate.get_installed_languages()
-    from_lang = next((l for l in installed if l.code == from_code), None)
-    to_lang = next((l for l in installed if l.code == to_code), None)
+    from_lang = next((lang for lang in installed if lang.code == from_code), None)
+    to_lang = next((lang for lang in installed if lang.code == to_code), None)
     if from_lang is None or to_lang is None:
         return None
     return from_lang.get_translation(to_lang)

@@ -588,9 +588,9 @@ class ControlPanel(QWidget):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _lbl(self, t: str) -> QLabel:
-        l = QLabel(t)
-        l.setObjectName("section_label")
-        return l
+        label = QLabel(t)
+        label.setObjectName("section_label")
+        return label
 
     def _sep(self) -> QFrame:
         f = QFrame()
