@@ -31,13 +31,14 @@ import difflib
 import functools
 import hashlib
 import logging
-import queue
 import re
+import threading
 import time
+from collections import deque
 
 from PyQt6.QtCore import QThread
 
-from models import RawSegment, TranslationRegion
+from models import RawSegment, RegionSnapshot, TranslationRegion
 from translation_providers import ArgosTranslator, BaseTranslator
 
 log = logging.getLogger("langscope.translation_worker")
@@ -51,6 +52,7 @@ DISPLAY_GRACE_MISSES = 0  # OCR cycles a missed region stays *visible* (0 = clea
 IOU_THRESHOLD = 0.30  # minimum bbox overlap to consider a match
 TEXT_SIM_THRESHOLD = 0.55  # minimum text similarity to accept a match
 EMA_ALPHA = 0.35  # bbox smoothing strength (0=frozen, 1=no smoothing)
+MAX_PENDING_BATCHES = 2  # OCR batches kept while the worker is busy; the oldest is dropped
 
 # ── Text filters ──────────────────────────────────────────────────────────────
 _MIN_ALPHA = 3
@@ -135,6 +137,54 @@ def _text_sim(a: str, b: str) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Mailbox
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _Mailbox:
+    """
+    A thread-safe, ordered inbox for TranslationWorker.
+
+    Messages come out in the order they went in. When too many "segments" batches are waiting
+    the oldest batch is dropped, because the worker only needs the freshest view of the screen.
+    Every other kind of message, such as a language change, is never dropped, so a slow
+    translation can't make a control message disappear.
+    """
+
+    def __init__(self, max_batches: int):
+        self._max_batches = max_batches
+        self._messages: deque[tuple[str, object]] = deque()
+        self._changed = threading.Condition()
+
+    def post(self, kind: str, payload: object = None) -> None:
+        with self._changed:
+            self._messages.append((kind, payload))
+            if kind == "segments":
+                waiting = [m for m in self._messages if m[0] == "segments"]
+                if len(waiting) > self._max_batches:
+                    self._messages.remove(waiting[0])
+            self._changed.notify()
+
+    def get(self, timeout: float) -> tuple[str, object] | None:
+        """The oldest message, waiting up to *timeout* seconds for one. None if there is none."""
+        with self._changed:
+            if not self._messages:
+                self._changed.wait(timeout)
+            return self._messages.popleft() if self._messages else None
+
+    def has_pending(self, kind: str) -> bool:
+        with self._changed:
+            return any(m[0] == kind for m in self._messages)
+
+    def drain(self) -> list[tuple[str, object]]:
+        """Remove and return everything that is waiting, oldest first."""
+        with self._changed:
+            messages = list(self._messages)
+            self._messages.clear()
+            return messages
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TranslationWorker
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -145,6 +195,12 @@ class TranslationWorker(QThread):
 
     Input:  enqueue(list[RawSegment])   — called from OCRWorker's signal.
     Output: latest_regions (polled by the render timer @ 60 FPS)
+
+    Threading: while the thread runs, only that thread touches the tracking state (regions,
+    translation cache, language pair). Other threads post messages to a mailbox, and the worker
+    publishes `latest_regions` as a tuple of immutable RegionSnapshot objects that the render
+    timer can read from any thread. While the thread is not running, set_languages() applies
+    directly, since nothing else is touching that state.
     """
 
     def __init__(self, translator: BaseTranslator | None = None, parent=None):
@@ -152,8 +208,11 @@ class TranslationWorker(QThread):
         self._translator: BaseTranslator = translator or ArgosTranslator()
         self._from_code = "en"
         self._to_code = "fr"
-        self._running = True
-        self._queue: queue.Queue = queue.Queue(maxsize=2)
+        self._mailbox = _Mailbox(MAX_PENDING_BATCHES)
+        # Guards the question "is the worker thread consuming the mailbox?", so a language
+        # change is either posted to a live thread or applied directly, never lost.
+        self._lifecycle = threading.Lock()
+        self._thread_active = False
         self._warmed_pair: tuple[str, str] | None = None
 
         # Active tracked regions — keyed by region_id
@@ -162,78 +221,96 @@ class TranslationWorker(QThread):
         # text-hash → translated string cache
         self._tx_cache: dict[str, str] = {}
 
-        # latest complete list — read by render timer (atomic assignment)
-        self.latest_regions: list[TranslationRegion] = []
+        # Latest snapshot for the render timer. Replaced as a whole (an atomic assignment) and
+        # never modified, so readers on other threads need no lock.
+        self.latest_regions: tuple[RegionSnapshot, ...] = ()
 
         self.translate_ms = 0.0
         self.cache_hits = 0
         self.cache_misses = 0
 
-    # ── Public API (main thread) ──────────────────────────────────────────────
+    # ── Public API (any thread) ───────────────────────────────────────────────
+
+    def start(self, *args, **kwargs) -> None:
+        # Marked active before the thread exists, so a set_languages() call that follows is
+        # posted to it instead of being applied from the caller's thread.
+        with self._lifecycle:
+            self._thread_active = True
+        super().start(*args, **kwargs)
 
     def set_languages(self, from_code: str, to_code: str) -> None:
-        self._from_code = from_code
-        self._to_code = to_code
-        self._regions.clear()
-        self._tx_cache.clear()
-        self.latest_regions = []
-        self._translator.clear_cache()
+        """Switch the language pair and forget everything tracked under the old one."""
+        with self._lifecycle:
+            if self._thread_active:
+                self._mailbox.post("languages", (from_code, to_code))
+                # Blank the display now; the worker resets its own state when it gets there.
+                self.latest_regions = ()
+                return
+        self._apply_languages(from_code, to_code)
 
     def enqueue(self, segments: list[RawSegment]) -> None:
-        """Non-blocking put; drops oldest entry if queue is full."""
-        if self._queue.full():
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                pass
-        try:
-            self._queue.put_nowait(segments)
-        except queue.Full:
-            pass
+        """Non-blocking; if the worker is behind, the oldest waiting batch is dropped."""
+        self._mailbox.post("segments", segments)
 
     def stop(self) -> None:
-        self._running = False
-        try:
-            self._queue.put_nowait(None)
-        except queue.Full:
-            pass
+        self._mailbox.post("stop")
         self.wait()
-        # Leave a clean slate for a restart: pending segments and tracked
-        # regions belong to the old capture area, and the sentinel is spent.
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
+        # Leave a clean slate for a restart: pending segments and tracked regions belong to
+        # the old capture area, and the stop message is spent.
+        self._mailbox.drain()
         self._regions.clear()
-        self.latest_regions = []
+        self.latest_regions = ()
 
     # ── Worker loop ───────────────────────────────────────────────────────────
 
     def run(self) -> None:
         log.debug("TranslationWorker started")
-        # stop() leaves _running False; reset it so a restarted thread runs.
-        self._running = True
-        while self._running:
-            self._warm_up_if_needed()
-            try:
-                item = self._queue.get(timeout=1.0)
-            except queue.Empty:
-                self._prune()
-                continue
+        try:
+            while True:
+                self._warm_up_if_needed()
+                message = self._mailbox.get(timeout=1.0)
+                if message is None:
+                    self._prune()
+                    continue
 
-            if item is None or not self._running:
-                if not self._running:
+                kind, payload = message
+                if kind == "stop":
                     break
-                continue  # stale stop() sentinel from a previous run
+                if kind == "languages":
+                    self._apply_languages(*payload)
+                elif kind == "segments":
+                    self._update(payload)
+                    # A language change that is already waiting makes this result stale.
+                    if not self._mailbox.has_pending("languages"):
+                        self._publish()
+        finally:
+            # Apply any language change that arrived too late to be handled in the loop, then
+            # hand control back, so set_languages() never posts to a thread that is gone.
+            with self._lifecycle:
+                for kind, payload in self._mailbox.drain():
+                    if kind == "languages":
+                        self._apply_languages(*payload)
+                self._thread_active = False
 
-            self._update(item)
-            # Display only what the latest OCR pass actually saw. Regions it
-            # missed stay tracked in self._regions (so they re-match instantly
-            # if they reappear) but are not drawn: otherwise translations of
-            # text that has left the screen linger on top of the new content.
-            live = [r for r in self._regions.values() if r.miss_count <= DISPLAY_GRACE_MISSES]
-            self.latest_regions = live
+    def _apply_languages(self, from_code: str, to_code: str) -> None:
+        self._from_code = from_code
+        self._to_code = to_code
+        self._regions.clear()
+        self._tx_cache.clear()
+        self.latest_regions = ()
+        try:
+            self._translator.clear_cache()
+        except Exception:
+            log.exception("Clearing the translator cache failed")
+
+    def _publish(self) -> None:
+        """Publish an immutable snapshot of what the latest OCR pass actually saw.
+
+        Regions it missed stay tracked in self._regions (so they re-match instantly if they
+        reappear) but are not drawn: otherwise translations of text that has left the screen
+        linger on top of the new content."""
+        live = [r for r in self._regions.values() if r.miss_count <= DISPLAY_GRACE_MISSES]
+        self.latest_regions = tuple(r.snapshot() for r in live)
 
     def _warm_up_if_needed(self) -> None:
         """Load the model for the current pair once (and again after a language

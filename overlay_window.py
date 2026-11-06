@@ -13,12 +13,14 @@ Update content via OverlayWindow.update_regions(regions, region_rect).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QPaintEvent
 from PyQt6.QtWidgets import QWidget
 
-from models import TranslationRegion
+from models import RegionSnapshot
 from render_utils import draw_translated_text
 from screen_utils import native_region_to_logical
 
@@ -41,7 +43,7 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self._regions: list[TranslationRegion] = []
+        self._regions: Sequence[RegionSnapshot] = ()
         self._active = False
         self._dpr = 1.0
         self._rect_key: tuple | None = None
@@ -59,7 +61,7 @@ class OverlayWindow(QWidget):
 
     def update_regions(
         self,
-        regions: list[TranslationRegion],
+        regions: Sequence[RegionSnapshot],
         capture_rect: dict,  # {"top", "left", "width", "height"}
     ) -> None:
         """Reposition window over capture region and update displayed regions."""

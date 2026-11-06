@@ -19,7 +19,7 @@ def test_overlay_draws_at_the_smoothed_position(qtbot):
     overlay = OverlayWindow()
     qtbot.addWidget(overlay)
     overlay.set_active(True)
-    overlay.update_regions([region], CAPTURE_RECT)
+    overlay.update_regions([region.snapshot()], CAPTURE_RECT)
 
     columns = painted_columns(render(overlay))
     assert columns is not None, "nothing was painted"

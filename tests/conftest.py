@@ -22,6 +22,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 @pytest.fixture
+def no_language_detection(monkeypatch):
+    """Make the worker treat all text as not yet in the target language.
+
+    langdetect is slow, and non-deterministic on short strings."""
+    import translation_worker
+
+    monkeypatch.setattr(translation_worker, "_already_target", lambda text, to_code: False)
+
+
+@pytest.fixture
 def fake_argos(monkeypatch, tmp_path):
     """Fake argostranslate and ctranslate2, even when the real packages are installed."""
     from tests.fake_argos import FakeArgos

@@ -153,7 +153,7 @@ def test_overlay_window_builds_and_paints_regions(qtbot):
     overlay.set_active(True)
     overlay.update_regions([], capture_rect)
     empty = render(overlay)
-    overlay.update_regions([region], capture_rect)
+    overlay.update_regions([region.snapshot()], capture_rect)
     painted = render(overlay)
     assert painted != empty
 
