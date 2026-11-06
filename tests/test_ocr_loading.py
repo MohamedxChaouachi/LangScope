@@ -160,8 +160,11 @@ class TestStopBeforeTheThreadRuns:
         worker.start()
         stopper = threading.Thread(target=worker.stop)
         stopper.start()
-        time.sleep(0.1)  # stop() has set its flag and is waiting for the thread
-        gate.set()
+        deadline = time.monotonic() + 5
+        while not worker._stop_requested.is_set() and time.monotonic() < deadline:
+            time.sleep(0.005)  # until stop() has really been requested
+        assert worker._stop_requested.is_set()
+        gate.set()  # only now may the thread reach its loop
         stopper.join(5)
         try:
             assert not stopper.is_alive(), "stop() never returned: the thread ignored the stop"
