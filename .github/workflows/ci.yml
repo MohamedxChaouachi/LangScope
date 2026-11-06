@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# The workflow only reads the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request replaces a run that is still going.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      # requirements-dev.txt pins ruff to the minor version the code was formatted with.
+      - name: Install ruff
+        run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      - name: Check formatting
+        run: ruff format --check .
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }}, Windows)
+    # LangScope supports Windows only, so the tests run there.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported release and the newest stable one. Python 3.10 reached end of life
+        # on 2026-10-01.
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      # Deliberately not requirements.txt: CI does not install torch, easyocr or argostranslate.
+      # Tests that need them skip themselves, and -ra (set in pyproject.toml) lists each skip
+      # with its reason.
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+      - name: Run tests
+        run: pytest
