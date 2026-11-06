@@ -35,7 +35,6 @@ import re
 import time
 from typing import Optional
 
-import numpy as np
 from PyQt6.QtCore import QThread
 
 from models import RawSegment, TranslationRegion

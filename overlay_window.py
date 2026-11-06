@@ -16,7 +16,7 @@ import numpy as np
 
 from PyQt6.QtCore  import Qt
 from PyQt6.QtGui   import QPainter, QPaintEvent, QKeyEvent
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QWidget
 
 from models import TranslationRegion
 from render_utils import draw_translated_text

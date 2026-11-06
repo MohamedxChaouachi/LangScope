@@ -15,7 +15,6 @@ import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from capture_manager import CaptureManager
-from models import RawSegment
 from ocr_providers import BaseOCR, EasyOCRProvider
 
 log = logging.getLogger("langscope.ocr_worker")

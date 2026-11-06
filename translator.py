@@ -197,7 +197,7 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
         return True
 
     # ── Fetch package index ────────────────────────────────────────────────
-    log.info(f"[Translator] Fetching Argos Translate package index…")
+    log.info("[Translator] Fetching Argos Translate package index…")
     try:
         argostranslate.package.update_package_index()
     except Exception as exc:

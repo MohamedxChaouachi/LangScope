@@ -83,7 +83,7 @@ def run(args: argparse.Namespace) -> None:
 
     for frame in frames:
         t0 = time.perf_counter()
-        segs = provider.read(frame)
+        provider.read(frame)
         total_ms = (time.perf_counter() - t0) * 1000
         total_samples.append(total_ms)
         prep_samples.append(provider.preprocess_ms)

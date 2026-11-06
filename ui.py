@@ -20,12 +20,12 @@ import qtawesome as qta
 
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QApplication, QComboBox, QFrame,
+    QPushButton, QComboBox, QFrame,
     QSizePolicy, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QRect, QPoint, QSize, QObject, pyqtSignal
 from PyQt6.QtGui  import (
-    QFont, QFontMetrics, QPainter, QColor, QPen,
+    QFont, QPainter, QColor, QPen,
     QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent, QIcon,
     QScreen, QGuiApplication, QCursor,
 )
@@ -33,7 +33,7 @@ from PyQt6.QtGui  import (
 from render_utils import draw_translated_text
 from screen_utils import local_rect_to_native, screen_at_native_point, screen_index
 from theme import (
-    COLOR_BG, COLOR_TEXT, COLOR_WHITE,
+    COLOR_TEXT, COLOR_WHITE,
     COLOR_ACCENT, COLOR_ACCENT_SOFT, COLOR_SURFACE, COLOR_BADGE,
     COLOR_STATUS, COLOR_SEPARATOR, COLOR_BORDER,
     COLOR_PRIMARY, COLOR_PRIMARY_HOVER, COLOR_PRIMARY_PRESSED,
