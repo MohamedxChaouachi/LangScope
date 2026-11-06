@@ -19,6 +19,27 @@ class RawSegment:
     score: float
 
 
+@dataclass(frozen=True, slots=True)
+class RegionSnapshot:
+    """
+    An immutable copy of a TranslationRegion, as the render timer should draw it.
+
+    TranslationWorker keeps changing its own TranslationRegion objects (position, text, miss
+    count) while it tracks, so another thread must never hold one. It publishes these copies
+    instead: nothing can change them, so they are safe to read from any thread.
+    """
+
+    region_id: str
+    smoothed_bbox: tuple[tuple[float, float], ...]
+    original_text: str
+    translated_text: str
+    confidence: float
+
+    @property
+    def has_translation(self) -> bool:
+        return bool(self.translated_text) and self.translated_text != self.original_text
+
+
 @dataclass
 class TranslationRegion:
     """
@@ -53,6 +74,16 @@ class TranslationRegion:
     @property
     def has_translation(self) -> bool:
         return bool(self.translated_text) and self.translated_text != self.original_text
+
+    def snapshot(self) -> RegionSnapshot:
+        """An immutable copy of what is drawn for this region right now."""
+        return RegionSnapshot(
+            region_id=self.region_id,
+            smoothed_bbox=tuple((float(pt[0]), float(pt[1])) for pt in self.smoothed_bbox),
+            original_text=self.original_text,
+            translated_text=self.translated_text,
+            confidence=self.confidence,
+        )
 
     # ── Smoothing ──────────────────────────────────────────────────────────────
 
