@@ -23,14 +23,47 @@ from PyQt6.QtWidgets import (
     QPushButton, QApplication, QComboBox, QFrame,
     QSizePolicy, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QRect, QPoint, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QRect, QPoint, QSize, QObject, pyqtSignal
 from PyQt6.QtGui  import (
     QFont, QFontMetrics, QPainter, QColor, QPen,
-    QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent,
+    QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent, QIcon,
     QScreen, QGuiApplication, QCursor,
 )
 
 from screen_utils import local_rect_to_native, screen_at_native_point, screen_index
+from theme import (
+    COLOR_BG, COLOR_TEXT, COLOR_WHITE,
+    COLOR_ACCENT, COLOR_ACCENT_SOFT, COLOR_SURFACE, COLOR_BADGE,
+    COLOR_STATUS, COLOR_SEPARATOR, COLOR_BORDER,
+    COLOR_PRIMARY, COLOR_PRIMARY_HOVER, COLOR_PRIMARY_PRESSED,
+    COLOR_SECONDARY, COLOR_SECONDARY_HOVER, COLOR_SECONDARY_PRESSED,
+    COLOR_SECONDARY_TEXT, COLOR_SELECTION,
+    COLOR_DANGER, COLOR_DANGER_HOVER, COLOR_DANGER_PRESSED,
+    COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
+    COLOR_FEED_BG, COLOR_FEED_PLACEHOLDER,
+    FONT_FAMILY, FONT_FAMILY_MONO,
+    FONT_SIZE_BASE, FONT_SIZE_SM, FONT_SIZE_XS, FONT_SIZE_LG, FONT_SIZE_TITLE,
+    SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL, SPACE_XXL,
+    RADIUS_SM, RADIUS_MD,
+)
+
+# Primary UI font family (first available), used where QFont is set directly.
+_UI_FONT = "Segoe UI Variable Display"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Assets
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Path to the app icon, resolved relative to this script so it keeps working
+# from any working directory and when packaged (e.g. PyInstaller onedir).
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+APP_ICON_PATH = os.path.join(_ASSETS_DIR, "langscope.png")
+
+# White checkmark used for the :checked checkbox indicator. QSS url() needs
+# forward slashes, so normalise the path for the stylesheet.
+_CHECK_ICON_PATH = os.path.join(_ASSETS_DIR, "check.png")
+_CHECK_ICON_URL = _CHECK_ICON_PATH.replace("\\", "/")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Language catalogue
@@ -128,7 +161,7 @@ class _ScreenSelectorWindow(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(r)
             p.setPen(QColor("#FFFFFF"))
-            p.setFont(QFont("Segoe UI", 10))
+            p.setFont(QFont(_UI_FONT, 10))
             d = self._screen.devicePixelRatio()
             p.drawText(r.left() + 4, r.top() - 6,
                        f"{round(r.width() * d)} x {round(r.height() * d)} px")
