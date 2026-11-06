@@ -367,6 +367,7 @@ class TestTranslatorAnswers:
 
     @pytest.mark.xfail(
         strict=True,
+        raises=AssertionError,
         reason=(
             "A failed translation is cached as if it were the translation: the worker stores "
             "the untranslated text, so once the translator works again the same text is still "
@@ -511,6 +512,7 @@ class TestPruning:
 
     @pytest.mark.xfail(
         strict=True,
+        raises=AssertionError,
         reason=(
             "_prune() only runs after a second without messages, so while OCR keeps producing "
             "batches, dead regions pile up in _regions. The module docstring says regions that "
