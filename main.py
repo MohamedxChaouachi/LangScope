@@ -132,6 +132,8 @@ if __name__ == "__main__":
             panel.set_status(f"✅ {from_code}→{to_code} ready")
             panel.set_from_badge("✅ Cached")
             panel.set_to_badge("✅ Cached")
+            # The translator may have given up warming up while the pack was missing.
+            tx_worker.retry_warm_up()
         else:
             panel.set_status(f"❌ Download failed for {from_code}→{to_code}")
             panel.set_from_badge("❌ Failed")

@@ -54,6 +54,8 @@ TEXT_SIM_THRESHOLD = 0.55  # minimum text similarity to accept a match
 EMA_ALPHA = 0.35  # bbox smoothing strength (0=frozen, 1=no smoothing)
 MAX_PENDING_BATCHES = 2  # OCR batches kept while the worker is busy; the oldest is dropped
 TX_CACHE_MAX = 512  # translated texts remembered; the least recently used is dropped
+WARMUP_RETRY_MIN = 1.0  # seconds before the first retry of a warm-up that did not succeed
+WARMUP_RETRY_MAX = 60.0  # the delay doubles after each failure, up to this
 
 # ── Text filters ──────────────────────────────────────────────────────────────
 _MIN_ALPHA = 3
@@ -255,6 +257,10 @@ class TranslationWorker(QThread):
         self._lifecycle = threading.Lock()
         self._thread_active = False
         self._warmed_pair: tuple[str, str] | None = None
+        # Warm-up back-off: no attempt before _warm_retry_at (a time.monotonic() value), and the
+        # wait grows after each failure. See _warm_up_if_needed().
+        self._warm_retry_at = 0.0
+        self._warm_delay = WARMUP_RETRY_MIN
 
         # Active tracked regions — keyed by region_id
         self._regions: dict[str, TranslationRegion] = {}
@@ -289,6 +295,16 @@ class TranslationWorker(QThread):
                 return
         self._apply_languages(from_code, to_code)
 
+    def retry_warm_up(self) -> None:
+        """Try to warm the model up again now, instead of when the back-off ends.
+
+        Call this when a language pack has finished installing."""
+        with self._lifecycle:
+            if self._thread_active:
+                self._mailbox.post("retry_warm_up")
+                return
+        self._reset_warm_up_backoff()
+
     def enqueue(self, segments: list[RawSegment]) -> None:
         """Non-blocking; if the worker is behind, the oldest waiting batch is dropped."""
         self._mailbox.post("segments", segments)
@@ -319,6 +335,8 @@ class TranslationWorker(QThread):
                     break
                 if kind == "languages":
                     self._apply_languages(*payload)
+                elif kind == "retry_warm_up":
+                    self._reset_warm_up_backoff()
                 elif kind == "segments":
                     self._update(payload)
                     # A language change that is already waiting makes this result stale.
@@ -339,6 +357,7 @@ class TranslationWorker(QThread):
         self._regions.clear()
         self._tx_cache.clear()
         self.latest_regions = ()
+        self._reset_warm_up_backoff()  # a new pair gets a fresh start
         try:
             self._translator.clear_cache()
         except Exception:
@@ -359,12 +378,29 @@ class TranslationWorker(QThread):
         pair = (self._from_code, self._to_code)
         if pair == self._warmed_pair or self._from_code == self._to_code:
             return
+        now = time.monotonic()
+        if now < self._warm_retry_at:
+            return  # a recent attempt failed; wait out the back-off
         try:
             _already_target("Loading the language detector profiles.", pair[1])
-            if self._translator.warm_up(*pair):
-                self._warmed_pair = pair
+            ready = self._translator.warm_up(*pair)
         except Exception as exc:
             log.warning("Warm-up failed: %s", exc)
+            ready = False
+        if ready:
+            self._warmed_pair = pair
+            self._reset_warm_up_backoff()
+            return
+        # Typically the language pack isn't installed yet. Trying again every second cannot
+        # help, so wait longer each time; retry_warm_up() cuts the wait short once the pack
+        # is installed, and so does a language change.
+        log.debug("Warm-up for %s -> %s not ready; retrying in %.0f s", *pair, self._warm_delay)
+        self._warm_retry_at = now + self._warm_delay
+        self._warm_delay = min(self._warm_delay * 2, WARMUP_RETRY_MAX)
+
+    def _reset_warm_up_backoff(self) -> None:
+        self._warm_retry_at = 0.0
+        self._warm_delay = WARMUP_RETRY_MIN
 
     # ── Region update ─────────────────────────────────────────────────────────
 
