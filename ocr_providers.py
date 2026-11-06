@@ -63,8 +63,8 @@ def _detect_gpu() -> bool:
     try:
         import torch
         ok = torch.cuda.is_available()
-        print(f"[OCR] CUDA GPU: {torch.cuda.get_device_name(0)}" if ok
-              else "[OCR] No CUDA GPU — CPU fallback.")
+        log.info(f"[OCR] CUDA GPU: {torch.cuda.get_device_name(0)}" if ok
+                 else "[OCR] No CUDA GPU — CPU fallback.")
         return ok
     except Exception as exc:
         log.warning(f"[OCR] GPU probe failed ({exc}) — CPU.")
@@ -72,6 +72,15 @@ def _detect_gpu() -> bool:
 
 
 _USE_GPU: bool = _detect_gpu()
+
+# GPU half-precision (fp16) — EXPERIMENTAL, opt-in only.
+# EasyOCR doesn't officially support this; we cast the underlying torch
+# modules ourselves. It CAN throw a dtype-mismatch error at inference time
+# (not just at load) if EasyOCR's forward pass doesn't autocast the input
+# tensor. Flip to True only after confirming with bench_ocr.py that a
+# single readtext() call succeeds on your GPU. Default OFF so the app
+# keeps working out of the box.
+USE_FP16: bool = False
 
 # EasyOCR recognises text boxes in batches. Its default (1) feeds the GPU one
 # box at a time; 16 is ~1.5-2x faster on a screen full of text at the cost of a
@@ -166,6 +175,12 @@ class EasyOCRProvider(BaseOCR):
         self._score_max  = 0.0
         self._det_count  = 0
 
+        # Split timing — set on every read() call, read by OCRWorker for
+        # the debug panel / benchmarks. preprocess_ms + inference_ms == the
+        # total ocr_ms OCRWorker already tracked; this just shows the split.
+        self.preprocess_ms = 0.0
+        self.inference_ms  = 0.0
+
     def set_language(self, from_code: str) -> None:
         new = EASYOCR_LANG_MAP.get(from_code, ["en"])
         if new != self._langs:
@@ -177,8 +192,13 @@ class EasyOCRProvider(BaseOCR):
 
     def read(self, frame: np.ndarray) -> list[RawSegment]:
         """Preprocess frame, run EasyOCR, filter by confidence, log stats."""
+        t0        = time.perf_counter()
         processed = preprocess(frame, self._cfg)
+        t1        = time.perf_counter()
         raw       = self._readtext(processed)
+        t2        = time.perf_counter()
+        self.preprocess_ms = (t1 - t0) * 1000
+        self.inference_ms  = (t2 - t1) * 1000
 
         # Scale bboxes back to original frame coordinates if upscaled
         scale = self._cfg.upscale_factor
@@ -235,6 +255,23 @@ class EasyOCRProvider(BaseOCR):
             self._cache[key] = r
             return r
 
+    @staticmethod
+    def _apply_fp16(reader) -> None:
+        """
+        Cast the detector + recognizer nets to fp16 in place. EasyOCR
+        doesn't expose this as a constructor argument, so we reach into
+        the underlying torch modules directly. Guarded — if EasyOCR's
+        internals differ across versions this just no-ops back to fp32
+        instead of crashing the app.
+        """
+        try:
+            reader.detector = reader.detector.half()
+            if hasattr(reader, "recognizer") and reader.recognizer is not None:
+                reader.recognizer = reader.recognizer.half()
+            log.info("[OCR] fp16 applied to detector + recognizer.")
+        except Exception as exc:
+            log.warning(f"[OCR] fp16 cast failed ({exc}) — staying fp32.")
+
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def _update_stats(self, score: float) -> None:
@@ -256,7 +293,7 @@ class EasyOCRProvider(BaseOCR):
             self._LOG_EVERY, self._det_count, avg,
             self._score_min, self._score_max, self._cfg.confidence,
         )
-        print(
+        log.debug(
             f"[OCR] Stats — calls={self._call_count}  dets={self._det_count}  "
             f"avg={avg:.2f}  min={self._score_min:.2f}  max={self._score_max:.2f}"
         )
