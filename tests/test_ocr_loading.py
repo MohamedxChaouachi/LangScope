@@ -1,0 +1,240 @@
+"""
+The OCR model is loaded on the OCR worker thread, never on the GUI thread.
+
+EasyOCR's reader takes seconds to build and, for a language it has not seen, downloads about
+200 MB first. Building it in OCRWorker.__init__ or in set_language() froze the window.
+"""
+
+import sys
+import threading
+import time
+import types
+
+import numpy as np
+import pytest
+
+from ocr_providers import BaseOCR
+from ocr_worker import OCRWorker
+
+MAIN_THREAD = threading.get_ident()
+
+
+class FakeCapture:
+    latest_frame = None
+
+
+class FakeOCR(BaseOCR):
+    """Records which thread each call ran on."""
+
+    def __init__(self, fail_load=False):
+        self.fail_load = fail_load
+        self.language_calls = []  # (language, thread id)
+        self.load_calls = []  # thread id
+        self.read_calls = 0
+
+    def read(self, frame):
+        self.read_calls += 1
+        return []
+
+    def set_language(self, from_code):
+        self.language_calls.append((from_code, threading.get_ident()))
+
+    def load(self):
+        self.load_calls.append(threading.get_ident())
+        if self.fail_load:
+            raise RuntimeError("download failed")
+
+
+@pytest.fixture
+def started(qtbot):
+    """Start workers and always stop them, even if the test fails."""
+    workers = []
+
+    def start(ocr=None, capture=None):
+        worker = OCRWorker(capture or FakeCapture(), ocr=ocr or FakeOCR())
+        statuses = []
+        worker.status_changed.connect(statuses.append)
+        workers.append(worker)
+        return worker, statuses
+
+    yield start
+    for worker in workers:
+        worker._stop_requested.set()
+        worker.wait(5000)
+
+
+class TestOcrWorkerLoading:
+    def test_creating_the_worker_and_choosing_a_language_loads_nothing(self, started):
+        ocr = FakeOCR()
+        worker, _ = started(ocr)
+        worker.set_languages("fr", "en")
+        assert ocr.language_calls == [] and ocr.load_calls == []
+
+    def test_model_loads_on_the_worker_thread_and_reports_status(self, qtbot, started):
+        ocr = FakeOCR()
+        worker, statuses = started(ocr)
+        worker.start()
+        qtbot.waitUntil(lambda: any("ready" in s for s in statuses), timeout=5000)
+
+        assert len(ocr.load_calls) == 1 and ocr.load_calls[0] != MAIN_THREAD
+        assert "Loading OCR model" in statuses[0]
+        assert "ready" in statuses[-1]
+
+    def test_a_language_change_loads_the_new_model_on_the_worker_thread(self, qtbot, started):
+        ocr = FakeOCR()
+        worker, statuses = started(ocr)
+        worker.start()
+        qtbot.waitUntil(lambda: len(ocr.load_calls) == 1, timeout=5000)
+
+        worker.set_languages("fr", "en")  # from the GUI thread
+        qtbot.waitUntil(lambda: len(ocr.load_calls) == 2, timeout=5000)
+
+        assert ocr.language_calls[-1][0] == "fr"
+        assert all(thread != MAIN_THREAD for _, thread in ocr.language_calls)
+        assert all(thread != MAIN_THREAD for thread in ocr.load_calls)
+        assert sum("Loading OCR model" in s for s in statuses) == 2
+
+    def test_ocr_starts_once_the_model_is_ready(self, qtbot, started):
+        ocr = FakeOCR()
+        capture = FakeCapture()
+        capture.latest_frame = np.full((40, 40, 3), 200, np.uint8)
+        worker, _ = started(ocr, capture)
+        worker.start()
+        qtbot.waitUntil(lambda: ocr.read_calls >= 1, timeout=5000)
+        assert len(ocr.load_calls) == 1
+
+    def test_changing_only_the_target_language_still_runs_ocr_on_a_static_screen(
+        self, qtbot, started
+    ):
+        # The translator drops its regions on any language change and needs fresh segments to
+        # repopulate them. With an unchanged screen, both change gates would skip the frame.
+        ocr = FakeOCR()
+        capture = FakeCapture()
+        capture.latest_frame = np.full((40, 40, 3), 200, np.uint8)
+        worker, _ = started(ocr, capture)
+        worker.set_languages("en", "fr")
+        worker.start()
+        qtbot.waitUntil(lambda: ocr.read_calls == 1, timeout=5000)
+        time.sleep(0.4)  # a few more passes: the unchanged frame must be skipped
+        assert ocr.read_calls == 1
+
+        worker.set_languages("en", "de")  # same OCR language, different target
+        qtbot.waitUntil(lambda: ocr.read_calls == 2, timeout=5000)
+
+    def test_a_failed_load_is_reported_and_ocr_is_not_attempted(self, qtbot, started):
+        ocr = FakeOCR(fail_load=True)
+        capture = FakeCapture()
+        capture.latest_frame = np.full((40, 40, 3), 200, np.uint8)
+        worker, statuses = started(ocr, capture)
+        worker.start()
+        qtbot.waitUntil(lambda: any("failed" in s for s in statuses), timeout=5000)
+        time.sleep(0.5)  # several loop iterations: it must not retry the load every time
+
+        assert len(ocr.load_calls) == 1
+        assert ocr.read_calls == 0
+
+    def test_a_failed_load_is_retried_after_a_language_change(self, qtbot, started):
+        ocr = FakeOCR(fail_load=True)
+        worker, statuses = started(ocr)
+        worker.start()
+        qtbot.waitUntil(lambda: any("failed" in s for s in statuses), timeout=5000)
+
+        ocr.fail_load = False
+        worker.set_languages("de", "en")
+        qtbot.waitUntil(lambda: any("ready" in s for s in statuses), timeout=5000)
+        assert len(ocr.load_calls) == 2
+
+
+class TestStopBeforeTheThreadRuns:
+    def test_a_stop_that_arrives_first_is_not_undone(self, started):
+        """run() used to set its running flag back to True, undoing a stop() that came in
+        before the thread began, and stop() then waited forever for a thread that never ends."""
+        gate = threading.Event()
+
+        class GatedStart(OCRWorker):
+            def run(self):
+                gate.wait(5)  # the thread exists but has not reached its loop yet
+                super().run()
+
+        worker = GatedStart(FakeCapture(), ocr=FakeOCR())
+        worker.start()
+        stopper = threading.Thread(target=worker.stop)
+        stopper.start()
+        time.sleep(0.1)  # stop() has set its flag and is waiting for the thread
+        gate.set()
+        stopper.join(5)
+        try:
+            assert not stopper.is_alive(), "stop() never returned: the thread ignored the stop"
+            assert not worker.isRunning()
+        finally:
+            worker._stop_requested.set()  # do not leave the thread spinning if it failed
+            worker.wait(5000)
+
+
+class _FakeEasyOcr(types.ModuleType):
+    """A stand-in for the easyocr package that counts the readers built and where."""
+
+    def __init__(self):
+        super().__init__("easyocr")
+        self.readers = []  # (langs, thread id)
+        outer = self
+
+        class Reader:
+            def __init__(self, langs, gpu=False, verbose=False):
+                outer.readers.append((tuple(langs), threading.get_ident()))
+
+            def readtext(self, img, detail=1, batch_size=1):
+                return []
+
+        self.Reader = Reader
+
+
+@pytest.fixture
+def fake_easyocr(monkeypatch):
+    module = _FakeEasyOcr()
+    monkeypatch.setitem(sys.modules, "easyocr", module)
+    return module
+
+
+class TestEasyOCRProviderIsLazy:
+    def make(self, from_code="en"):
+        from ocr_providers import EasyOCRProvider
+
+        return EasyOCRProvider(from_code)
+
+    def test_construction_and_set_language_build_no_reader(self, fake_easyocr):
+        provider = self.make()
+        provider.set_language("fr")
+        assert fake_easyocr.readers == []
+
+    def test_load_builds_the_reader_for_the_current_language_once(self, fake_easyocr):
+        provider = self.make()
+        provider.set_language("ja")
+        provider.load()
+        provider.load()
+        assert [langs for langs, _ in fake_easyocr.readers] == [("ja",)]
+
+    def test_read_loads_lazily_for_callers_that_never_call_load(self, fake_easyocr):
+        # bench_ocr.py works this way; its warm-up call absorbs the load.
+        provider = self.make("en")
+        provider.read(np.zeros((30, 30, 3), np.uint8))
+        assert [langs for langs, _ in fake_easyocr.readers] == [("en",)]
+
+    def test_the_reader_is_built_on_the_calling_thread(self, fake_easyocr):
+        provider = self.make()
+        built_on = []
+        thread = threading.Thread(target=lambda: (provider.load(), built_on.append(1)))
+        thread.start()
+        thread.join()
+        assert fake_easyocr.readers[0][1] != MAIN_THREAD
+
+    def test_switching_language_loads_a_new_reader_and_switching_back_reuses_one(
+        self, fake_easyocr
+    ):
+        provider = self.make("en")
+        provider.load()
+        provider.set_language("ja")
+        provider.load()
+        provider.set_language("en")
+        provider.load()
+        assert [langs for langs, _ in fake_easyocr.readers] == [("en",), ("ja",)]

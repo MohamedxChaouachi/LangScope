@@ -172,7 +172,13 @@ class BaseOCR(ABC):
     def read(self, frame: np.ndarray) -> list[RawSegment]: ...
 
     def set_language(self, from_code: str) -> None:
-        """Notify of a source-language change. Override when model reload is needed."""
+        """Notify of a source-language change. Should only record it: any model work belongs
+        in load(), which the caller runs where blocking is acceptable."""
+
+    def load(self) -> None:
+        """Load whatever model read() needs for the current language, so the first read()
+        isn't slow. May block for seconds, or download; call it off the GUI thread. No-op by
+        default."""
 
     def set_preprocess_config(self, cfg: PreprocessConfig) -> None:
         """Update preprocessing config at runtime. No-op by default."""
@@ -200,7 +206,8 @@ class EasyOCRProvider(BaseOCR):
         self._langs = EASYOCR_LANG_MAP.get(from_code, ["en"])
         self._cfg = preprocess_cfg or PreprocessConfig()
         self._batch_size = _OCR_BATCH_SIZE
-        self._reader = self._get_reader(self._langs)
+        # No reader is built here: that takes seconds and may download ~200 MB. It happens in
+        # load(), or on the first read(), on whichever thread calls them.
 
         # Confidence stats
         self._call_count = 0
@@ -216,20 +223,23 @@ class EasyOCRProvider(BaseOCR):
         self.inference_ms = 0.0
 
     def set_language(self, from_code: str) -> None:
-        new = EASYOCR_LANG_MAP.get(from_code, ["en"])
-        if new != self._langs:
-            self._langs = new
-            self._reader = self._get_reader(new)
+        # Only records the choice; the matching reader is built by load() or the next read().
+        self._langs = EASYOCR_LANG_MAP.get(from_code, ["en"])
+
+    def load(self) -> None:
+        self._get_reader(self._langs)
 
     def set_preprocess_config(self, cfg: PreprocessConfig) -> None:
         self._cfg = cfg
 
     def read(self, frame: np.ndarray) -> list[RawSegment]:
         """Preprocess frame, run EasyOCR, filter by confidence, log stats."""
+        # Fetched before the timers start, so a first-time load isn't counted as inference.
+        reader = self._get_reader(self._langs)
         t0 = time.perf_counter()
         processed = preprocess(frame, self._cfg)
         t1 = time.perf_counter()
-        raw = self._readtext(processed)
+        raw = self._readtext(reader, processed)
         t2 = time.perf_counter()
         self.preprocess_ms = (t1 - t0) * 1000
         self.inference_ms = (t2 - t1) * 1000
@@ -253,12 +263,12 @@ class EasyOCRProvider(BaseOCR):
 
         return segments
 
-    def _readtext(self, img: np.ndarray):
+    def _readtext(self, reader, img: np.ndarray):
         """readtext with GPU batching, backing off to smaller batches if the
         card runs out of VRAM (large regions) instead of failing the frame."""
         while True:
             try:
-                return self._reader.readtext(img, detail=1, batch_size=self._batch_size)
+                return reader.readtext(img, detail=1, batch_size=self._batch_size)
             except Exception as exc:
                 oom = "out of memory" in str(exc).lower()
                 if not (oom and _USE_GPU and self._batch_size > 1):

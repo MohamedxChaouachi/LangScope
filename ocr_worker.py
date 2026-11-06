@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 import time
 
 import numpy as np
@@ -47,21 +48,35 @@ def _content_changed(frame: np.ndarray, prev: np.ndarray) -> bool:
     return int(np.count_nonzero(changed)) >= MIN_CHANGED_PX
 
 
+_NOT_LOADED = object()  # "no language has been loaded yet" (None is a real choice: the default)
+
+
 class OCRWorker(QThread):
     """
     QThread: polls CaptureManager.latest_frame, runs OCR on changed frames.
 
+    The OCR model is loaded here, on the worker thread, never on the GUI thread: building an
+    EasyOCR reader takes seconds and may download ~200 MB. The provider is only ever called
+    from this thread, and set_languages() merely records the choice for the loop to act on.
+
     Signals:
         raw_segments_ready(list[RawSegment])
+        status_changed(str)   — "Loading OCR model…", then "OCR model ready" (or a failure)
     """
 
     raw_segments_ready = pyqtSignal(object)
+    status_changed = pyqtSignal(str)
 
     def __init__(self, capture: CaptureManager, ocr: BaseOCR | None = None, parent=None):
         super().__init__(parent)
         self._capture = capture
         self._ocr = ocr or EasyOCRProvider()
-        self._running = True
+        # Set by stop(), cleared by start() before the thread exists. run() never touches it,
+        # so a stop() that arrives before the thread gets going can't be undone.
+        self._stop_requested = threading.Event()
+        # Written by the GUI thread only (plain assignments); read by the worker.
+        self._wanted_language: str | None = None
+        self._language_requests = 0  # counts set_languages() calls, even repeats of a language
         self._last_hash = ""
         self._last_frame: np.ndarray | None = None
 
@@ -79,33 +94,75 @@ class OCRWorker(QThread):
         self._recent_ms: list[float] = []
         self.avg_ocr_ms = 0.0
 
-    # ── Public setters (main thread) ──────────────────────────────────────────
+    # ── Public API (main thread) ──────────────────────────────────────────────
+
+    def start(self, *args, **kwargs) -> None:
+        self._stop_requested.clear()
+        super().start(*args, **kwargs)
 
     def set_languages(self, from_code: str, to_code: str) -> None:
-        self._ocr.set_language(from_code)
-        self._last_hash = ""  # force re-OCR
+        # Only records the choice. The worker thread tells the provider, loads the model and
+        # re-runs OCR on the current frame, so nothing slow happens here.
+        self._wanted_language = from_code
+        self._language_requests += 1
 
     def stop(self) -> None:
-        self._running = False
+        self._stop_requested.set()
         self.wait()
 
     # ── Worker loop ───────────────────────────────────────────────────────────
 
+    def _load_model(self, language: str | None) -> bool:
+        """Point the provider at *language* and load its model. False if that failed."""
+        self.status_changed.emit("Loading OCR model…")
+        try:
+            if language is not None:
+                self._ocr.set_language(language)
+            self._ocr.load()
+        except Exception:
+            log.exception("Could not load the OCR model")
+            self.status_changed.emit("OCR model failed to load — see the log")
+            return False
+        self.status_changed.emit("OCR model ready")
+        return True
+
     def run(self) -> None:
         log.debug("OCRWorker started (%.0f FPS)", OCR_FPS)
-        # stop() leaves _running False; without this reset a restarted thread
-        # would exit immediately and OCR would silently never run again.
-        self._running = True
         # Forget the previous region's frame so the first frame after a restart
         # is always OCR'd, even if the screen content hasn't changed.
         self._last_hash = ""
         self._last_frame = None
-        while self._running:
+        loaded_language: object = _NOT_LOADED
+        model_ready = False
+        seen_requests = self._language_requests
+        while not self._stop_requested.is_set():
             t0 = time.perf_counter()
+
+            # Any set_languages() call forces a fresh OCR pass, even when the OCR language is
+            # unchanged: the translator has dropped its regions and needs new segments to fill
+            # them again. Both change gates must be reset, or a static screen is still skipped.
+            requests = self._language_requests
+            if requests != seen_requests:
+                seen_requests = requests
+                self._last_hash = ""
+                self._last_frame = None
+
+            # Load the model for the wanted language. A failure is not retried on every pass:
+            # it stays failed until the language changes or the worker is restarted.
+            wanted = self._wanted_language
+            if wanted != loaded_language:
+                loaded_language = wanted
+                model_ready = self._load_model(wanted)
+                self._last_hash = ""  # the new model must see the current frame again
+                self._last_frame = None
+            if not model_ready:
+                self._stop_requested.wait(OCR_INTERVAL)
+                continue
+
             frame = self._capture.latest_frame
 
             if frame is None:
-                time.sleep(OCR_INTERVAL)
+                self._stop_requested.wait(OCR_INTERVAL)
                 continue
 
             fhash = _hash_frame(frame)
@@ -156,4 +213,4 @@ class OCRWorker(QThread):
             self._sleep(t0)
 
     def _sleep(self, t0: float) -> None:
-        time.sleep(max(0.0, OCR_INTERVAL - (time.perf_counter() - t0)))
+        self._stop_requested.wait(max(0.0, OCR_INTERVAL - (time.perf_counter() - t0)))

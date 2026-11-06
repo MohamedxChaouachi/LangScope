@@ -78,6 +78,8 @@ if __name__ == "__main__":
 
     # OCR → TranslationWorker (cross-thread, via queue)
     ocr_worker.raw_segments_ready.connect(tx_worker.enqueue)
+    # The OCR model loads on the worker thread; show its progress in the status bar.
+    ocr_worker.status_changed.connect(panel.set_status)
 
     # ── Render timer (60 FPS) ─────────────────────────────────────────────────
     _capture_region: dict = {"top": 100, "left": 100, "width": 500, "height": 200}
