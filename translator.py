@@ -151,10 +151,31 @@ def get_cache_stats() -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# Argos ships a pack between English and every other language, plus a few direct pairs such as
+# es <-> pt. For any other pair it chains two packs through English at translation time, so
+# setting such a pair up means having both packs.
+PIVOT_LANGUAGE = "en"
+
+
+def _pivot_legs(from_code: str, to_code: str) -> tuple[tuple[str, str], tuple[str, str]] | None:
+    """The two packs (from → English, English → to) that a pivoted pair needs.
+
+    None when pivoting does not apply, because English is already one end of the pair."""
+    if PIVOT_LANGUAGE in (from_code, to_code):
+        return None
+    return (from_code, PIVOT_LANGUAGE), (PIVOT_LANGUAGE, to_code)
+
+
 def is_package_installed(from_code: str, to_code: str) -> bool:
-    """Return True if the *from_code* → *to_code* package is already on disk."""
-    installed = argostranslate.package.get_installed_packages()
-    return any(p.from_code == from_code and p.to_code == to_code for p in installed)
+    """Return True if *from_code* → *to_code* can be translated with what is on disk.
+
+    That is the case when the direct pack is installed, or when both packs of the pivot
+    through English are."""
+    installed = set(get_installed_pairs())
+    if (from_code, to_code) in installed:
+        return True
+    legs = _pivot_legs(from_code, to_code)
+    return legs is not None and all(leg in installed for leg in legs)
 
 
 def get_installed_pairs() -> list[tuple[str, str]]:
@@ -167,12 +188,27 @@ def get_installed_pairs() -> list[tuple[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _install_package(pkg) -> bool:
+    """Download and install one language pack. Returns False (after logging) if that fails."""
+    pair = f"{pkg.from_code} → {pkg.to_code}"
+    log.info("[Translator] ⬇  Downloading %s language pack (~100 MB)…", pair)
+    try:
+        argostranslate.package.install_from_path(pkg.download())
+    except Exception as exc:
+        log.error("[Translator] ❌ Installation failed for %s: %s", pair, exc)
+        return False
+    log.info("[Translator] ✅ Package %s installed and cached.", pair)
+    return True
+
+
 def setup_translation_models(from_code: str, to_code: str) -> bool:
     """
-    Ensure the *from_code* → *to_code* language pack is installed locally.
+    Ensure *from_code* → *to_code* can be translated with locally installed packs.
 
-    * If the pack is already cached → returns True immediately (no network).
-    * If not → fetches the package index, downloads and installs (~100 MB).
+    * If it can already → returns True immediately (no network).
+    * If the package index offers a direct pack → downloads and installs it (~100 MB).
+    * Otherwise → pivots through English: installs whichever of from → English and
+      English → to is missing. Nothing is downloaded unless every missing pack is in the index.
     * Same-language pairs (en→en) are a no-op and return True immediately.
 
     Args:
@@ -180,18 +216,18 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
         to_code:   BCP-47 target language code, e.g. ``"fr"``.
 
     Returns:
-        True if the package is ready to use, False if setup failed.
+        True if the pair is ready to use, False if setup failed.
     """
     pair = f"{from_code} → {to_code}"
 
     # Same language — nothing to translate, always "ready"
     if from_code == to_code:
-        log.info(f"[Translator] Same language ({from_code}), skipping setup.")
+        log.info("[Translator] Same language (%s), skipping setup.", from_code)
         return True
 
     # ── Already cached on disk? ────────────────────────────────────────────
     if is_package_installed(from_code, to_code):
-        log.info(f"[Translator] ✅ Package {pair} already cached — ready.")
+        log.info("[Translator] ✅ Package %s already cached — ready.", pair)
         return True
 
     # ── Fetch package index ────────────────────────────────────────────────
@@ -199,32 +235,47 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
     try:
         argostranslate.package.update_package_index()
     except Exception as exc:
-        log.warning(f"[Translator] ⚠  Could not update package index: {exc}")
+        log.warning("[Translator] ⚠  Could not update package index: %s", exc)
         # Fall through — we may still find the package in a stale index
 
-    # ── Locate the package ─────────────────────────────────────────────────
-    available = argostranslate.package.get_available_packages()
-    pkg = next(
-        (p for p in available if p.from_code == from_code and p.to_code == to_code),
-        None,
-    )
-    if pkg is None:
+    # ── Decide which packs are needed ──────────────────────────────────────
+    available: dict[tuple[str, str], object] = {}
+    for p in argostranslate.package.get_available_packages():
+        available.setdefault((p.from_code, p.to_code), p)
+
+    needed: list = []
+    direct = available.get((from_code, to_code))
+    if direct is not None:
+        needed = [direct]
+    else:
+        legs = _pivot_legs(from_code, to_code)
+        if legs is not None:
+            installed = set(get_installed_pairs())
+            missing = [leg for leg in legs if leg not in installed]
+            if not missing:  # a pack finished installing since the check above
+                return True
+            if all(leg in available for leg in missing):
+                needed = [available[leg] for leg in missing]
+                log.info("[Translator] No direct %s pack — pivoting through English.", pair)
+            else:
+                unavailable = [leg for leg in missing if leg not in available]
+                log.error(
+                    "[Translator] ❌ No package found for %s: no direct pack, and the index lacks %s.",
+                    pair,
+                    ", ".join(f"{a} → {b}" for a, b in unavailable),
+                )
+                return False
+
+    if not needed:
         log.error(
-            f"[Translator] ❌ No package found for {pair}.\n"
-            "  Available pairs: https://www.argosopentech.com/argospm/index/"
+            "[Translator] ❌ No package found for %s.\n"
+            "  Available pairs: https://www.argosopentech.com/argospm/index/",
+            pair,
         )
         return False
 
     # ── Download & install ─────────────────────────────────────────────────
-    log.info(f"[Translator] ⬇  Downloading {pair} language pack (~100 MB)…")
-    try:
-        download_path = pkg.download()
-        argostranslate.package.install_from_path(download_path)
-        log.info(f"[Translator] ✅ Package {pair} installed and cached.")
-        return True
-    except Exception as exc:
-        log.error(f"[Translator] ❌ Installation failed for {pair}: {exc}")
-        return False
+    return all(_install_package(pkg) for pkg in needed)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
