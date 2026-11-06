@@ -352,7 +352,7 @@ class TranslationWorker(QThread):
         """Translate all cache-miss texts in one Argos call."""
         # Deduplicate by hash so identical texts aren't sent twice
         unique: dict[str, list[TranslationRegion]] = {}
-        for h, seg, reg in items:
+        for h, _seg, reg in items:
             if h in self._tx_cache:
                 reg.translated_text = self._tx_cache[h]
                 self.cache_hits += 1
@@ -367,7 +367,7 @@ class TranslationWorker(QThread):
         # Gather one representative text per hash
         hash_order = list(unique.keys())
         texts_by_hash = {}
-        for h, seg, reg in items:
+        for h, seg, _reg in items:
             if h in unique and h not in texts_by_hash:
                 texts_by_hash[h] = seg.text
 
