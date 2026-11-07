@@ -286,3 +286,4 @@ The harness reports preprocess, inference and total mean/median/p95 latency, plu
 
 - Additional OCR and translation engines behind the existing `BaseOCR` / `BaseTranslator` interfaces
 - Non-Windows support
+- Prebuilt Windows release
