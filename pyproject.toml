@@ -118,6 +118,8 @@ known-first-party = ["langscope"]
 # The package. The tests and the command-line scripts are not type-checked.
 include = ["src/langscope"]
 extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
 # "standard" is pyright's default. "basic" would switch off reportIncompatibleMethodOverride,
 # which this project wants on (see the Qt event handlers, which opt out one line at a time).
 typeCheckingMode = "standard"

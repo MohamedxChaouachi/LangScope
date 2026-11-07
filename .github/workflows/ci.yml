@@ -64,10 +64,12 @@ jobs:
       # lists each skip with its reason. The tests import the package from src/ (pytest's
       # pythonpath setting), so the package itself is not installed either.
       - name: Install dependencies
-        run: pip install -r requirements-ci.txt
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements-ci.txt
       - name: Run tests
-        run: pytest
+        run: .\.venv\Scripts\python.exe -m pytest
       # Type-check in the same environment as the tests: it has PyQt6, numpy and OpenCV for
       # pyright to read. The packages CI does not install carry scoped ignores in the code.
       - name: Type-check
-        run: pyright
+        run: .\.venv\Scripts\pyright.exe
