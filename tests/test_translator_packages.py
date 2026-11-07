@@ -97,3 +97,41 @@ class TestSetupTranslationModels:
         fake_argos.add_available("en", "de")
         assert translator_module.setup_translation_models("fr", "de") is True
         assert fake_argos.index_updates == 1
+
+
+class TestArgosLanguagePacks:
+    """The LanguagePacks the application uses: it forwards to translator.py."""
+
+    @pytest.fixture
+    def packs(self, fake_argos, translator_module):
+        from translation_providers import ArgosLanguagePacks
+
+        return ArgosLanguagePacks()
+
+    def test_it_reports_an_installed_pair(self, fake_argos, packs):
+        fake_argos.add_installed("fr", "en")
+        assert packs.is_installed("fr", "en") is True
+
+    def test_it_reports_a_pair_that_is_not_installed(self, fake_argos, packs):
+        fake_argos.add_installed("fr", "en")
+        assert packs.is_installed("en", "fr") is False
+
+    def test_a_pivot_through_english_counts_as_installed(self, fake_argos, packs):
+        fake_argos.add_installed("fr", "en")
+        fake_argos.add_installed("en", "de")
+        assert packs.is_installed("fr", "de") is True
+
+    def test_it_installs_a_missing_pair_from_the_index(self, fake_argos, packs):
+        fake_argos.add_available("en", "fr")
+        assert packs.install("en", "fr") is True
+        assert fake_argos.installs == [("en", "fr")]
+
+    def test_it_reports_an_install_that_cannot_succeed(self, fake_argos, packs):
+        assert packs.install("en", "fr") is False  # the index has no such pack
+        assert fake_argos.installs == []
+
+    def test_the_two_directions_are_not_mixed_up(self, fake_argos, packs):
+        fake_argos.add_available("fr", "en")
+        assert packs.install("en", "fr") is False
+        assert packs.install("fr", "en") is True
+        assert fake_argos.installs == [("fr", "en")]

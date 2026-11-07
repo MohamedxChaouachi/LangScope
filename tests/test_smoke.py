@@ -73,7 +73,7 @@ def test_main_imports_with_translator_stubbed(monkeypatch):
     spec = importlib.util.spec_from_file_location("main_under_test", ROOT / "main.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert hasattr(module, "PackageSetupThread")
+    assert callable(module.main)
 
 
 # ── Widgets ──────────────────────────────────────────────────────────────────
