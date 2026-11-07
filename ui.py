@@ -236,9 +236,18 @@ class _ScreenSelectorWindow(QWidget):
             )
 
     def _rect(self) -> QRect:
-        """The dragged rectangle. Only called once a drag has started."""
+        """The dragged rectangle, including the pixels under both corners, whichever way the
+        mouse moved. Only called once a drag has started.
+
+        QRect(a, b).normalized() would leave out the far corner whenever the second point is
+        above or to the left of the first, so a drag toward the top-left selected a region one
+        pixel smaller on each side than the same drag made the other way round."""
         assert self._origin is not None and self._current is not None
-        return QRect(self._origin, self._current).normalized()
+        a, b = self._origin, self._current
+        return QRect(
+            QPoint(min(a.x(), b.x()), min(a.y(), b.y())),
+            QPoint(max(a.x(), b.x()), max(a.y(), b.y())),
+        )
 
 
 class RegionSelector(QObject):

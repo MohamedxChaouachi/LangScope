@@ -55,12 +55,25 @@ class TestPickingARegion:
         assert picked == [(50, 100, 201, 151)]
         assert cancelled == []
 
-    def test_dragging_up_and_to_the_left_picks_the_region_between_the_points(self, window, signals):
+    @pytest.mark.parametrize(
+        "start, end",
+        [
+            ((100, 50), (300, 200)),  # down and to the right
+            ((300, 200), (100, 50)),  # up and to the left
+            ((100, 200), (300, 50)),  # up and to the right
+            ((300, 50), (100, 200)),  # down and to the left
+        ],
+    )
+    def test_a_drag_picks_the_same_region_in_every_direction(self, window, signals, start, end):
         picked, _ = signals
-        drag(window, (300, 200), (100, 50))
-        # QRect.normalized() of an inverted rectangle leaves out the far corner, so this region
-        # is one pixel smaller on each side than the same drag made the other way round.
-        assert picked == [(51, 101, 199, 149)]
+        drag(window, start, end)
+        assert picked == [(50, 100, 201, 151)]
+
+    def test_a_drag_includes_the_pixels_under_both_corners(self, window, signals):
+        picked, _ = signals
+        drag(window, (10, 10), (19, 19))  # from pixel 10 to pixel 19: ten pixels each way
+        drag(window, (19, 19), (10, 10))
+        assert picked == [(10, 10, 10, 10), (10, 10, 10, 10)]
 
     def test_a_drag_that_starts_at_the_top_left_pixel_of_the_screen_counts(self, window, signals):
         # A QPoint at (0, 0) is falsy, so truthiness checks on the drag origin lose this drag.
