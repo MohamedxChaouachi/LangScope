@@ -11,24 +11,28 @@ continuously. Readers (OCRWorker, render timer) simply read that attribute.
 Thread safety: Python's GIL makes a single-reference attribute assignment
 atomic for readers. A Lock guards the mutable region dict.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
 import time
-from typing import Optional
+from types import ModuleType
 
 import numpy as np
 
+from langscope.models import Region
+
 log = logging.getLogger("langscope.capture")
 
-TARGET_FPS     = 60.0
+TARGET_FPS = 60.0
 FRAME_INTERVAL = 1.0 / TARGET_FPS
 
 
 def _primary_monitor_rect() -> tuple[int, int, int, int]:
     """(left, top, width, height) of the primary monitor in desktop pixels."""
     from mss import mss as _mss
+
     with _mss() as sct:
         monitors = sct.monitors[1:] or sct.monitors[:1]
     for m in monitors:
@@ -38,9 +42,20 @@ def _primary_monitor_rect() -> tuple[int, int, int, int]:
     return m["left"], m["top"], m["width"], m["height"]
 
 
-def _try_dxcam():
+def _monitor(region: Region) -> dict[str, int]:
+    """The plain dict mss takes for a region."""
+    return {
+        "top": region["top"],
+        "left": region["left"],
+        "width": region["width"],
+        "height": region["height"],
+    }
+
+
+def _try_dxcam() -> ModuleType | None:
     try:
-        import dxcam
+        import dxcam  # pyright: ignore[reportMissingImports]  # optional dependency
+
         return dxcam
     except ImportError:
         return None
@@ -56,28 +71,26 @@ class CaptureManager:
         cm.stop()
     """
 
-    def __init__(self):
-        self.latest_frame: Optional[np.ndarray] = None
-        self._region:      dict   = {"top": 0, "left": 0, "width": 800, "height": 600}
-        self._region_lock  = threading.Lock()
-        self._running:     bool   = False
-        self._thread: Optional[threading.Thread] = None
-        self._dxcam                = _try_dxcam()
-        self._backend: str         = "dxcam" if self._dxcam else "mss"
-        log.info(f"[Capture] Backend: {self._backend}")
+    def __init__(self) -> None:
+        self.latest_frame: np.ndarray | None = None
+        self._region: Region = {"top": 0, "left": 0, "width": 800, "height": 600}
+        self._region_lock = threading.Lock()
+        self._running: bool = False
+        self._thread: threading.Thread | None = None
+        self._dxcam = _try_dxcam()
+        self._backend: str = "dxcam" if self._dxcam else "mss"
+        log.info("[Capture] Backend: %s", self._backend)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def start(self, region: dict) -> None:
+    def start(self, region: Region) -> None:
         self.set_region(region)
         if self._running:
             return
         # Don't let OCR / the live feed see the previous region's last frame.
         self.latest_frame = None
         self._running = True
-        self._thread  = threading.Thread(
-            target=self._loop, name="CaptureThread", daemon=True
-        )
+        self._thread = threading.Thread(target=self._loop, name="CaptureThread", daemon=True)
         self._thread.start()
         log.debug("CaptureManager started (backend=%s)", self._backend)
 
@@ -88,9 +101,9 @@ class CaptureManager:
         self._thread = None
         log.debug("CaptureManager stopped.")
 
-    def set_region(self, region: dict) -> None:
+    def set_region(self, region: Region) -> None:
         with self._region_lock:
-            self._region = dict(region)
+            self._region = region.copy()
 
     # ── Loops ─────────────────────────────────────────────────────────────────
 
@@ -102,10 +115,11 @@ class CaptureManager:
 
     def _loop_dxcam(self) -> None:
         try:
+            if self._dxcam is None:  # the dxcam backend is only chosen when it imported
+                raise RuntimeError("dxcam is not installed")
             camera = self._dxcam.create(output_color="BGR")
         except Exception as exc:
-            log.warning(f"[Capture] DXCam init failed ({exc}) — switching to MSS.")
-            log.warning("DXCam init failed: %s", exc)
+            log.warning("[Capture] DXCam init failed (%s) — switching to MSS.", exc)
             self._backend = "mss"
             self._loop_mss()
             return
@@ -115,54 +129,65 @@ class CaptureManager:
         # regions inside it. Regions on any other monitor are grabbed with MSS,
         # which works in global virtual-desktop coordinates.
         sct = None
+        fall_back = False
         try:
             from mss import mss as _mss
+
             px, py, pw, ph = _primary_monitor_rect()
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:
-                    r = dict(self._region)
+                    r = self._region.copy()
                 inside_primary = (
-                    r["left"] >= px and r["top"] >= py
-                    and r["left"] + r["width"]  <= px + pw
-                    and r["top"]  + r["height"] <= py + ph
+                    r["left"] >= px
+                    and r["top"] >= py
+                    and r["left"] + r["width"] <= px + pw
+                    and r["top"] + r["height"] <= py + ph
                 )
                 if inside_primary:
-                    frame = camera.grab(region=(
-                        r["left"] - px, r["top"] - py,
-                        r["left"] - px + r["width"],
-                        r["top"]  - py + r["height"],
-                    ))
+                    frame = camera.grab(
+                        region=(
+                            r["left"] - px,
+                            r["top"] - py,
+                            r["left"] - px + r["width"],
+                            r["top"] - py + r["height"],
+                        )
+                    )
                 else:
                     if sct is None:
                         sct = _mss()
-                    frame = np.array(sct.grab(r))[..., :3]   # BGRA → BGR
+                    frame = np.array(sct.grab(_monitor(r)))[..., :3]  # BGRA → BGR
                 if frame is not None:
                     self.latest_frame = frame
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))
         except Exception as exc:
-            log.error(f"[Capture] DXCam error ({exc}) — switching to MSS.")
-            log.exception("DXCam error: %s", exc)
+            log.exception("[Capture] DXCam error (%s) — switching to MSS.", exc)
             self._backend = "mss"
-            self._loop_mss()
+            fall_back = True
         finally:
             if sct is not None:
                 try:
                     sct.close()
                 except Exception:
                     pass
+            # Release the DXGI duplication explicitly. `del camera` only drops this name, and
+            # dxcam keeps its own reference to the instance, so nothing would be freed.
             try:
-                del camera
-            except Exception:
-                pass
+                camera.release()
+            except Exception as exc:
+                log.debug("[Capture] DXCam release failed (%s)", exc, exc_info=True)
+        # Only now, with the camera let go, switch backends.
+        if fall_back:
+            self._loop_mss()
 
     def _loop_mss(self) -> None:
         from mss import mss as _mss
+
         with _mss() as sct:
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:
-                    r = dict(self._region)
-                screenshot = sct.grab(r)
-                self.latest_frame = np.array(screenshot)[..., :3]   # BGRA → BGR
+                    r = self._region.copy()
+                screenshot = sct.grab(_monitor(r))
+                self.latest_frame = np.array(screenshot)[..., :3]  # BGRA → BGR
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))

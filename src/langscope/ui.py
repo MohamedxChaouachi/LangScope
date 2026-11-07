@@ -1,62 +1,149 @@
 """
 ui.py — Live Translator UI
 
-LiveFeedWidget renders:
-  1. The live screen capture frame (updated at ~60 FPS by render timer).
-  2. For each TranslationRegion: a filled background covering the original
-     text, then the translated text drawn at a font size matched to bbox height.
+The control panel window and the widgets inside it.
 
-ControlPanel adds:
-  - Overlay Mode toggle checkbox
-  - Live FPS counter in the status bar
+LiveFeedWidget renders:
+  1. The live screen capture frame (updated by the render timer).
+  2. For each tracked region: a filled background covering the original text, then the
+     translated text, drawn by render_utils.draw_translated_text.
+
+RegionSelector lets the user drag out the capture region on any screen; its result is
+emitted in native pixels (see screen_utils).
+
+ControlPanel holds the language pickers, region selection, start/stop, the Desktop Overlay and
+Debug Mode toggles, the status line with the FPS counter, and the debug stats strip.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 
 import numpy as np
 import qtawesome as qta
-
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QCursor,
+    QFont,
+    QGuiApplication,
+    QIcon,
+    QImage,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPixmap,
+    QScreen,
+    QShowEvent,
+)
 from PyQt6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QApplication, QComboBox, QFrame,
-    QSizePolicy, QCheckBox,
-)
-from PyQt6.QtCore import Qt, QRect, QPoint, QObject, pyqtSignal
-from PyQt6.QtGui  import (
-    QFont, QFontMetrics, QPainter, QColor, QPen,
-    QPixmap, QImage, QKeyEvent, QMouseEvent, QPaintEvent,
-    QScreen, QGuiApplication, QCursor,
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
 
-from screen_utils import local_rect_to_native, screen_at_native_point, screen_index
+from langscope.models import BBox
+from langscope.render_utils import draw_translated_text
+from langscope.screen_utils import local_rect_to_native, screen_at_native_point, screen_index
+from langscope.theme import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_SOFT,
+    COLOR_BADGE,
+    COLOR_BORDER,
+    COLOR_DANGER,
+    COLOR_DANGER_HOVER,
+    COLOR_DANGER_PRESSED,
+    COLOR_DISABLED_BG,
+    COLOR_DISABLED_TEXT,
+    COLOR_FEED_BG,
+    COLOR_FEED_PLACEHOLDER,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_HOVER,
+    COLOR_PRIMARY_PRESSED,
+    COLOR_SECONDARY,
+    COLOR_SECONDARY_HOVER,
+    COLOR_SECONDARY_PRESSED,
+    COLOR_SECONDARY_TEXT,
+    COLOR_SELECTION,
+    COLOR_SEPARATOR,
+    COLOR_STATUS,
+    COLOR_SURFACE,
+    COLOR_TEXT,
+    COLOR_WHITE,
+    FONT_FAMILY,
+    FONT_FAMILY_MONO,
+    FONT_SIZE_BASE,
+    FONT_SIZE_LG,
+    FONT_SIZE_SM,
+    FONT_SIZE_TITLE,
+    FONT_SIZE_XS,
+    RADIUS_MD,
+    RADIUS_SM,
+    SPACE_LG,
+    SPACE_MD,
+    SPACE_SM,
+    SPACE_XL,
+    SPACE_XS,
+    SPACE_XXL,
+)
+
+# Primary UI font family (first available), used where QFont is set directly.
+_UI_FONT = "Segoe UI Variable Display"
+
+# What the live feed draws for one region: (bbox, original_text, translated_text), optionally
+# followed by (region_id, confidence) for the debug overlay.
+Detection = tuple[BBox, str, str] | tuple[BBox, str, str, str, float]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Assets
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Path to the app icon, resolved relative to this script so it keeps working
+# from any working directory and when packaged (e.g. PyInstaller onedir).
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+APP_ICON_PATH = os.path.join(_ASSETS_DIR, "langscope.png")
+
+# White checkmark used for the :checked checkbox indicator. QSS url() needs
+# forward slashes, so normalise the path for the stylesheet.
+_CHECK_ICON_PATH = os.path.join(_ASSETS_DIR, "check.png")
+_CHECK_ICON_URL = _CHECK_ICON_PATH.replace("\\", "/")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Language catalogue
 # ─────────────────────────────────────────────────────────────────────────────
 
 ALL_LANGUAGES: list[tuple[str, str]] = [
-    ("🇬🇧  English",    "en"),
-    ("🇫🇷  French",     "fr"),
-    ("🇪🇸  Spanish",    "es"),
-    ("🇩🇪  German",     "de"),
-    ("🇮🇹  Italian",    "it"),
+    ("🇬🇧  English", "en"),
+    ("🇫🇷  French", "fr"),
+    ("🇪🇸  Spanish", "es"),
+    ("🇩🇪  German", "de"),
+    ("🇮🇹  Italian", "it"),
     ("🇵🇹  Portuguese", "pt"),
-    ("🇷🇴  Romanian",   "ro"),
-    ("🇷🇺  Russian",    "ru"),
-    ("🇨🇳  Chinese",    "zh"),
-    ("🇯🇵  Japanese",   "ja"),
-    ("🇦🇪  Arabic",     "ar"),
+    ("🇷🇴  Romanian", "ro"),
+    ("🇷🇺  Russian", "ru"),
+    ("🇨🇳  Chinese", "zh"),
+    ("🇯🇵  Japanese", "ja"),
+    ("🇦🇪  Arabic", "ar"),
 ]
 
-_DEFAULT_FROM_IDX = 0   # English
-_DEFAULT_TO_IDX   = 1   # French
+_DEFAULT_FROM_IDX = 0  # English
+_DEFAULT_TO_IDX = 1  # French
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RegionSelector  (multi-monitor)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class _ScreenSelectorWindow(QWidget):
     """
@@ -65,49 +152,53 @@ class _ScreenSelectorWindow(QWidget):
     Emits `region_picked(top, left, width, height)` in NATIVE desktop pixels
     (see screen_utils), so the result is valid on any monitor and DPI.
     """
+
     region_picked = pyqtSignal(int, int, int, int)
-    cancelled     = pyqtSignal()
-    _DIM_ALPHA    = 130
+    cancelled = pyqtSignal()
+    _DIM_ALPHA = 130
 
     def __init__(self, screen: QScreen, label: str):
         super().__init__()
         self._screen = screen
-        self._label  = label
-        self._origin:  QPoint | None = None
+        self._label = label
+        self._origin: QPoint | None = None
         self._current: QPoint | None = None
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
-        )
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setScreen(screen)
         self.setGeometry(screen.geometry())
 
-    def showEvent(self, e) -> None:
+    def showEvent(self, e: QShowEvent | None) -> None:
         # Re-apply after the native window exists so mixed-DPI setups land on
         # the right screen.
         self.setScreen(self._screen)
         self.setGeometry(self._screen.geometry())
         super().showEvent(e)
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:
+    # The PyQt6 stubs type the argument of an event handler as `QEvent | None`. Qt never passes
+    # None, so these handlers take the event itself, and each one opts out of pyright's override
+    # check on its own line.
+    def keyPressEvent(self, e: QKeyEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if e.key() == Qt.Key.Key_Escape:
             self.cancelled.emit()
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:
+    def mousePressEvent(self, e: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if e.button() == Qt.MouseButton.LeftButton:
             self._origin = self._current = e.pos()
             self.update()
         elif e.button() == Qt.MouseButton.RightButton:
             self.cancelled.emit()
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:
-        if self._origin:
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        # "is not None", not truthiness: a QPoint at (0, 0) is falsy, and a drag that starts
+        # at the top-left pixel of the screen is still a drag.
+        if self._origin is not None:
             self._current = e.pos()
             self.update()
 
-    def mouseReleaseEvent(self, e: QMouseEvent) -> None:
-        if e.button() == Qt.MouseButton.LeftButton and self._origin:
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        if e.button() == Qt.MouseButton.LeftButton and self._origin is not None:
             rect = self._rect()
             self._origin = self._current = None
             if rect.width() > 5 and rect.height() > 5:
@@ -115,35 +206,45 @@ class _ScreenSelectorWindow(QWidget):
             else:
                 self.cancelled.emit()
 
-    def paintEvent(self, _: QPaintEvent) -> None:
+    def paintEvent(self, _: QPaintEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), QColor(0, 0, 0, self._DIM_ALPHA))
-        if self._origin and self._current:
+        if self._origin is not None and self._current is not None:
             r = self._rect()
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
             p.fillRect(r, QColor(0, 0, 0, 255))
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
             p.setPen(QPen(QColor(COLOR_ACCENT), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(r)
+            p.drawRect(QRectF(r.left(), r.top(), r.width(), r.height()))
             p.setPen(QColor("#FFFFFF"))
-            p.setFont(QFont("Segoe UI", 10))
+            p.setFont(QFont(_UI_FONT, 10))
             d = self._screen.devicePixelRatio()
-            p.drawText(r.left() + 4, r.top() - 6,
-                       f"{round(r.width() * d)} x {round(r.height() * d)} px")
+            p.drawText(
+                r.left() + 4, r.top() - 6, f"{round(r.width() * d)} x {round(r.height() * d)} px"
+            )
         else:
             p.setPen(QColor("#FFFFFF"))
             p.setFont(QFont(_UI_FONT, 14))
             p.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter,
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
                 f"{self._label}\n"
                 "Click and drag to select the capture region\n"
                 "(ESC or right-click to cancel)",
             )
 
     def _rect(self) -> QRect:
-        return QRect(self._origin, self._current).normalized()
+        """The dragged rectangle, with the mouse positions as its edges."""
+        assert self._origin is not None and self._current is not None
+        a, b = self._origin, self._current
+        return QRect(
+            min(a.x(), b.x()),
+            min(a.y(), b.y()),
+            abs(a.x() - b.x()),
+            abs(a.y() - b.y()),
+        )
 
 
 class RegionSelector(QObject):
@@ -155,9 +256,10 @@ class RegionSelector(QObject):
     pixels (origin = top-left of the primary screen; may be negative for
     monitors placed left of / above the primary).
     """
+
     region_selected = pyqtSignal(int, int, int, int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._windows: list[_ScreenSelectorWindow] = []
 
@@ -172,7 +274,7 @@ class RegionSelector(QObject):
             w.show()
         self._focus_window_under_cursor()
 
-    # Kept so ControlPanel._open_selector needs no changes.
+    # ControlPanel shows, raises and activates the selector as if it were a single window.
     def activateWindow(self) -> None:
         self._focus_window_under_cursor()
 
@@ -187,8 +289,7 @@ class RegionSelector(QObject):
         if not self._windows:
             return
         cur = QCursor.pos()
-        target = next((w for w in self._windows if w.geometry().contains(cur)),
-                      self._windows[0])
+        target = next((w for w in self._windows if w.geometry().contains(cur)), self._windows[0])
         target.activateWindow()
         target.setFocus()
 
@@ -207,6 +308,7 @@ class RegionSelector(QObject):
 # LiveFeedWidget
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class LiveFeedWidget(QWidget):
     """
     Renders the latest captured frame plus translated-text overlays.
@@ -214,25 +316,23 @@ class LiveFeedWidget(QWidget):
     Detections format: list[(bbox, original_text, translated_text, region_id?, confidence?)]
     The last two fields are optional — when absent, debug mode shows no metadata.
 
-    Improvements over v1:
-      - Uses smoothed_bbox coordinates (passed as bbox by render timer)
-      - Proper multiline wrapping via Qt.TextFlag.TextWordWrap
-      - Font auto-sized to fit the bbox height, then shrunk to fit width
-      - Translated background clipped to widget bounds
-      - Optional debug overlay: raw OCR bbox, confidence score, region ID
+    The render timer passes each region's smoothed_bbox as the bbox. The translated text is
+    drawn by render_utils.draw_translated_text: word-wrapped, with the font sized to the box
+    height and then shrunk to fit its width, on a background clipped to the widget.
+    Debug mode adds the raw OCR box, the confidence score and the region id.
     """
 
     _PLACEHOLDER = "📺  Select a region and press  ▶ Start\nto see the live preview"
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(250)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._pixmap:      QPixmap | None = None
-        self._detections:  list           = []
-        self._orig_w:      int            = 1
-        self._orig_h:      int            = 1
-        self._debug_mode:  bool           = False
+        self._pixmap: QPixmap | None = None
+        self._detections: Sequence[Detection] = []
+        self._orig_w: int = 1
+        self._orig_h: int = 1
+        self._debug_mode: bool = False
 
     def set_debug(self, enabled: bool) -> None:
         self._debug_mode = enabled
@@ -240,21 +340,31 @@ class LiveFeedWidget(QWidget):
 
     def update_frame(
         self,
-        frame_bgr:  np.ndarray,
-        detections: list,
-        orig_w:     int,
-        orig_h:     int,
+        frame_bgr: np.ndarray,
+        detections: Sequence[Detection],
+        orig_w: int,
+        orig_h: int,
     ) -> None:
         """Called from the main thread every ~16 ms by the render timer."""
         self._detections = detections
-        self._orig_w     = max(1, orig_w)
-        self._orig_h     = max(1, orig_h)
-        rgb  = np.ascontiguousarray(frame_bgr[:, :, ::-1])
-        qimg = QImage(rgb.data, orig_w, orig_h, orig_w * 3, QImage.Format.Format_RGB888)
-        self._pixmap = QPixmap.fromImage(qimg.copy())
+        self._orig_w = max(1, orig_w)
+        self._orig_h = max(1, orig_h)
+        rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
+        # sip accepts any buffer object here, such as the array's memoryview; the stub only
+        # lists bytes, which would need a copy of the whole frame.
+        qimg = QImage(  # pyright: ignore[reportCallIssue]
+            rgb.data,  # pyright: ignore[reportArgumentType]
+            orig_w,
+            orig_h,
+            orig_w * 3,
+            QImage.Format.Format_RGB888,
+        )
+        # fromImage copies the pixels into the pixmap, so the QImage (which only wraps the
+        # numpy buffer) needs no copy of its own first.
+        self._pixmap = QPixmap.fromImage(qimg)
         self.update()
 
-    def paintEvent(self, _: QPaintEvent) -> None:
+    def paintEvent(self, _: QPaintEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -270,11 +380,12 @@ class LiveFeedWidget(QWidget):
             return
 
         scaled = self._pixmap.scaled(
-            W, H,
+            W,
+            H,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        px = (W - scaled.width())  // 2
+        px = (W - scaled.width()) // 2
         py = (H - scaled.height()) // 2
 
         p.fillRect(0, 0, W, H, QColor(COLOR_FEED_BG))
@@ -283,22 +394,22 @@ class LiveFeedWidget(QWidget):
         if not self._detections:
             return
 
-        sx = scaled.width()  / self._orig_w
+        sx = scaled.width() / self._orig_w
         sy = scaled.height() / self._orig_h
 
         for entry in self._detections:
-            # Support both 3-tuple (legacy) and 5-tuple (debug) formats
+            # An entry has 3 fields; the region id and confidence (the last 2) are optional.
             bbox, original, translated = entry[0], entry[1], entry[2]
-            region_id  = entry[3] if len(entry) > 3 else ""
+            region_id = entry[3] if len(entry) > 3 else ""
             confidence = entry[4] if len(entry) > 4 else None
 
             pts = np.array(bbox, dtype=float)
-            x1  = int(pts[:, 0].min() * sx) + px
-            y1  = int(pts[:, 1].min() * sy) + py
-            x2  = int(pts[:, 0].max() * sx) + px
-            y2  = int(pts[:, 1].max() * sy) + py
-            bw  = max(1, x2 - x1)
-            bh  = max(1, y2 - y1)
+            x1 = int(pts[:, 0].min() * sx) + px
+            y1 = int(pts[:, 1].min() * sy) + py
+            x2 = int(pts[:, 0].max() * sx) + px
+            y2 = int(pts[:, 1].max() * sy) + py
+            bw = max(1, x2 - x1)
+            bh = max(1, y2 - y1)
 
             # ── Debug overlay ─────────────────────────────────────────────────
             if self._debug_mode:
@@ -317,79 +428,34 @@ class LiveFeedWidget(QWidget):
             if not translated or translated == original:
                 continue
 
-            # Auto-size font to fit bbox height (cap at 24 pt)
-            font_pt = min(24, max(6, int(bh * 0.72)))
-            font    = QFont("Segoe UI", font_pt, QFont.Weight.Bold)
-            fm      = QFontMetrics(font)
-
-            # Shrink font until text fits horizontally (with 8 px padding)
-            while font_pt > 6:
-                fm = QFontMetrics(font)
-                if fm.horizontalAdvance(translated) <= bw - 8:
-                    break
-                font_pt -= 1
-                font.setPointSize(font_pt)
-
-            fm     = QFontMetrics(font)
-            line_h = fm.height()
-
-            # Estimate number of lines needed for word-wrap
-            words   = translated.split()
-            lines   = []
-            current = ""
-            for word in words:
-                test = (current + " " + word).strip()
-                if fm.horizontalAdvance(test) <= bw - 8:
-                    current = test
-                else:
-                    if current:
-                        lines.append(current)
-                    current = word
-            if current:
-                lines.append(current)
-            if not lines:
-                lines = [translated]
-
-            needed_h = line_h * len(lines) + 4
-            bg_h     = max(bh, needed_h)
-
-            # Clamp background to widget bounds
-            draw_x1 = max(0, x1)
-            draw_y1 = max(0, y1)
-            draw_x2 = min(W, x1 + bw)
-            draw_y2 = min(H, y1 + bg_h)
-            draw_bw = draw_x2 - draw_x1
-            draw_bh = draw_y2 - draw_y1
-
-            if draw_bw <= 0 or draw_bh <= 0:
-                continue
-
-            p.fillRect(draw_x1, draw_y1, draw_bw, draw_bh, QColor(10, 12, 30, 235))
-            p.setFont(font)
-            p.setPen(QColor("#E0F7FA"))
-
-            # Draw each line, vertically centred within the background block
-            top_offset = max(0, (draw_bh - needed_h) // 2)
-            for li, line in enumerate(lines):
-                ty = draw_y1 + top_offset + li * line_h + fm.ascent()
-                if ty > draw_y2:
-                    break
-                p.drawText(draw_x1 + 4, ty, line)
+            # Shared bbox-clamped, word-wrapped, shrink-to-fit renderer.
+            draw_translated_text(
+                p,
+                translated,
+                x1,
+                y1,
+                bw,
+                bh,
+                W,
+                H,
+                max_font_pt=24,
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ControlPanel
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ControlPanel(QWidget):
-    start_requested       = pyqtSignal()
-    stop_requested        = pyqtSignal()
-    region_changed        = pyqtSignal(int, int, int, int)
-    language_pair_changed = pyqtSignal(str, str)
-    overlay_toggled       = pyqtSignal(bool)
-    debug_toggled         = pyqtSignal(bool)   # NEW
 
-    def __init__(self, parent=None):
+class ControlPanel(QWidget):
+    start_requested = pyqtSignal()
+    stop_requested = pyqtSignal()
+    region_changed = pyqtSignal(int, int, int, int)
+    language_pair_changed = pyqtSignal(str, str)
+    overlay_toggled = pyqtSignal(bool)
+    debug_toggled = pyqtSignal(bool)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._running = False
         self.setWindowTitle("LangScope")
@@ -412,13 +478,15 @@ class ControlPanel(QWidget):
         # ── Compact top toolbar ───────────────────────────────────────────────
         # A single framed toolbar holding two rows so the live feed gets the
         # rest of the vertical space by default.
-        toolbar = QFrame(); toolbar.setObjectName("toolbar")
+        toolbar = QFrame()
+        toolbar.setObjectName("toolbar")
         tb = QVBoxLayout(toolbar)
         tb.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_MD, SPACE_SM)
         tb.setSpacing(SPACE_SM)
 
         # Row 1 — brand + language pickers
-        row1 = QHBoxLayout(); row1.setSpacing(SPACE_MD)
+        row1 = QHBoxLayout()
+        row1.setSpacing(SPACE_MD)
 
         title_icon = QLabel()
         title_icon.setObjectName("title_icon")
@@ -441,23 +509,23 @@ class ControlPanel(QWidget):
         row1.addWidget(self._lbl("FROM"))
         self._from_combo = self._combo(_DEFAULT_FROM_IDX)
         row1.addWidget(self._from_combo, stretch=1)
-        self._from_badge = QLabel(""); self._from_badge.setObjectName("badge")
+        self._from_badge = QLabel("")
+        self._from_badge.setObjectName("badge")
         self._from_badge.setFixedWidth(70)
         row1.addWidget(self._from_badge)
 
         # arrow separator between the two pickers
         arrow = QLabel()
         arrow.setObjectName("title_icon")
-        arrow.setPixmap(
-            qta.icon("fa5s.arrow-right", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14))
-        )
+        arrow.setPixmap(qta.icon("fa5s.arrow-right", color=COLOR_ACCENT_SOFT).pixmap(QSize(14, 14)))
         row1.addWidget(arrow)
 
         # TO picker
         row1.addWidget(self._lbl("TO"))
         self._to_combo = self._combo(_DEFAULT_TO_IDX)
         row1.addWidget(self._to_combo, stretch=1)
-        self._to_badge = QLabel(""); self._to_badge.setObjectName("badge")
+        self._to_badge = QLabel("")
+        self._to_badge.setObjectName("badge")
         self._to_badge.setFixedWidth(70)
         row1.addWidget(self._to_badge)
 
@@ -467,7 +535,8 @@ class ControlPanel(QWidget):
         self._to_combo.currentIndexChanged.connect(self._on_lang_changed)
 
         # Row 2 — actions + toggles + region info
-        row2 = QHBoxLayout(); row2.setSpacing(SPACE_MD)
+        row2 = QHBoxLayout()
+        row2.setSpacing(SPACE_MD)
 
         self._select_btn = QPushButton("  Select Region")
         self._select_btn.setObjectName("secondary")
@@ -488,25 +557,17 @@ class ControlPanel(QWidget):
         self._start_btn.clicked.connect(self._toggle)
         row2.addWidget(self._start_btn)
 
-        # Overlay + Debug toggles
-        toggle_row = QHBoxLayout(); toggle_row.setSpacing(16)
-        self._overlay_chk = QCheckBox("🖥  Desktop Overlay")
+        self._overlay_chk = QCheckBox("  Desktop Overlay")
         self._overlay_chk.setObjectName("overlay_chk")
         self._overlay_chk.setCursor(Qt.CursorShape.PointingHandCursor)
         self._overlay_chk.setIcon(qta.icon("fa5s.desktop", color=COLOR_ACCENT_SOFT))
         self._overlay_chk.setIconSize(QSize(16, 16))
         self._overlay_chk.setMinimumWidth(150)
         self._overlay_chk.toggled.connect(self.overlay_toggled.emit)
-        toggle_row.addWidget(self._overlay_chk)
-        self._debug_chk = QCheckBox("🔍  Debug Mode")
-        self._debug_chk.setObjectName("overlay_chk")   # reuse same style
-        self._debug_chk.toggled.connect(self.debug_toggled.emit)
-        toggle_row.addWidget(self._debug_chk)
-        toggle_row.addStretch()
-        root.addLayout(toggle_row)
+        row2.addWidget(self._overlay_chk)
 
         self._debug_chk = QCheckBox("  Debug Mode")
-        self._debug_chk.setObjectName("overlay_chk")   # reuse same style
+        self._debug_chk.setObjectName("overlay_chk")  # reuse same style
         self._debug_chk.setCursor(Qt.CursorShape.PointingHandCursor)
         self._debug_chk.setIcon(qta.icon("fa5s.search", color=COLOR_ACCENT_SOFT))
         self._debug_chk.setIconSize(QSize(16, 16))
@@ -558,14 +619,19 @@ class ControlPanel(QWidget):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _lbl(self, t: str) -> QLabel:
-        l = QLabel(t); l.setObjectName("section_label"); return l
+        label = QLabel(t)
+        label.setObjectName("section_label")
+        return label
 
     def _sep(self) -> QFrame:
-        f = QFrame(); f.setFrameShape(QFrame.Shape.HLine)
-        f.setObjectName("separator"); return f
+        f = QFrame()
+        f.setFrameShape(QFrame.Shape.HLine)
+        f.setObjectName("separator")
+        return f
 
     def _combo(self, idx: int) -> QComboBox:
-        c = QComboBox(); c.setObjectName("combo")
+        c = QComboBox()
+        c.setObjectName("combo")
         for name, code in ALL_LANGUAGES:
             c.addItem(name, userData=code)
         c.setCurrentIndex(idx)
@@ -582,10 +648,11 @@ class ControlPanel(QWidget):
         screen = screen_at_native_point(left + w // 2, top + h // 2)
         n_screens = len(QGuiApplication.screens())
         where = f"Screen {screen_index(screen)}/{n_screens}  " if n_screens > 1 else ""
-        self._region_label.setText(f"📍 {where}({left}, {top})  —  {w} x {h} px")
+        self._region_label.setText(f"{where}({left}, {top})  —  {w} x {h} px")
         self._start_btn.setEnabled(True)
         self.region_changed.emit(top, left, w, h)
-        self.activateWindow(); self.raise_()
+        self.activateWindow()
+        self.raise_()
 
     def _on_lang_changed(self, _: int) -> None:
         self.language_pair_changed.emit(
@@ -613,12 +680,17 @@ class ControlPanel(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def update_live_feed(self, frame_bgr, detections: list,
-                         orig_w: int, orig_h: int) -> None:
+    def update_live_feed(
+        self, frame_bgr: np.ndarray, detections: Sequence[Detection], orig_w: int, orig_h: int
+    ) -> None:
         self._feed.update_frame(frame_bgr, detections, orig_w, orig_h)
 
     def set_debug(self, enabled: bool) -> None:
         self._feed.set_debug(enabled)
+        # Stats strip is only visible while Debug Mode is on.
+        self._stats_label.setVisible(enabled)
+        if not enabled:
+            self._stats_label.clear()
 
     def set_status(self, text: str) -> None:
         self._status.setText(text)
@@ -628,12 +700,12 @@ class ControlPanel(QWidget):
 
     def set_stats(
         self,
-        ocr_ms:         float,
-        preprocess_ms:  float,
-        inference_ms:   float,
-        translate_ms:   float,
-        cache_hits:     int,
-        cache_misses:   int,
+        ocr_ms: float,
+        preprocess_ms: float,
+        inference_ms: float,
+        translate_ms: float,
+        cache_hits: int,
+        cache_misses: int,
     ) -> None:
         """Update the debug stats strip. No-op display unless Debug Mode is on."""
         total = cache_hits + cache_misses
@@ -661,10 +733,7 @@ class ControlPanel(QWidget):
 
     def _apply_styles(self) -> None:
         # White tick drawn inside the checked indicator (if the asset exists).
-        _check_img = (
-            f" image:url('{_CHECK_ICON_URL}');"
-            if os.path.exists(_CHECK_ICON_PATH) else ""
-        )
+        _check_img = f" image:url('{_CHECK_ICON_URL}');" if os.path.exists(_CHECK_ICON_PATH) else ""
         self.setStyleSheet(f"""
             /* ── Base ─────────────────────────────────────────────────────── */
             QWidget {{ background:{COLOR_WHITE}; color:{COLOR_TEXT};
@@ -741,7 +810,7 @@ class ControlPanel(QWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
         """)
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:
+    def keyPressEvent(self, e: QKeyEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if e.key() == Qt.Key.Key_Escape:
             self.close()
         else:

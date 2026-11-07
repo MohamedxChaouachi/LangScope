@@ -1,0 +1,127 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langscope"
+version = "0.1.0"
+description = "Offline live screen translator: OCR and translation run locally, and the translation is drawn over the original text."
+readme = "README.md"
+# Python 3.10 reached end of life on 2026-10-01.
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Chaouachi Mohamed" }]
+keywords = ["ocr", "translation", "screen", "overlay", "offline", "pyqt6"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
+    "Topic :: Text Processing :: Linguistic",
+]
+# PyTorch is deliberately not listed. EasyOCR needs it, but the right build (CPU, or a CUDA
+# version) comes from a custom index URL that a dependency list cannot express, so the README
+# has you install it first.
+dependencies = [
+    "PyQt6>=6.6.0",
+    "qtawesome>=1.4.2",
+    "mss>=9.0.1",
+    "numpy>=1.24.0",
+    "opencv-python-headless",
+    "easyocr>=1.7.0",
+    "langdetect>=1.0.9",
+    # translator.py reads Argos internals that are not a public API (see
+    # tests/test_argos_contract.py). 1.9.x lacks the settings and the sentence splitter it
+    # uses, and 1.12 has not been looked at yet.
+    "argostranslate>=1.10.0,<1.12",
+]
+
+[project.optional-dependencies]
+# Lower-latency screen capture of the primary monitor.
+dxcam = ["dxcam>=0.3.0"]
+# Keep these in step with requirements-ci.txt (tests/test_packaging.py checks it).
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    # ruff's formatter output can change between minor releases, so stay on one minor version.
+    "ruff~=0.17.4",
+    # pyright adds new checks in most releases, so every machine and CI run uses the same one.
+    # (mypy is not used: 2.4.1 fails on a syntax error in PyQt6 6.12's own QtGui.pyi.)
+    "pyright==1.1.414",
+]
+
+[project.scripts]
+langscope = "langscope.main:main"
+
+[project.urls]
+Repository = "https://github.com/MohamedxChaouachi/LangScope"
+Issues = "https://github.com/MohamedxChaouachi/LangScope/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+langscope = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The package lives in src/, so a fresh clone can run the tests without installing it.
+pythonpath = ["src"]
+# -ra lists every skipped test with its reason in the summary.
+addopts = "-ra"
+qt_api = "pyqt6"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "."]
+
+[tool.ruff.lint]
+# Rule families are enabled one at a time; each is added together with the fixes it needs.
+select = [
+    "E4",  # pycodestyle: import errors
+    "E7",  # pycodestyle: statement errors (semicolons, ambiguous names, lambdas, bare except)
+    "E9",  # pycodestyle: syntax and I/O errors
+    "W",   # pycodestyle: whitespace and escape-sequence warnings
+    "F",   # pyflakes: undefined names, unused imports and variables
+    "UP",  # pyupgrade: modern syntax for the target Python version
+    "B",   # flake8-bugbear: likely bugs and design problems
+    "I",   # isort: import ordering
+    "T20", # flake8-print: application code logs, it does not print
+    "G",   # flake8-logging-format: log with %-style arguments, not f-strings
+]
+ignore = [
+    # BaseOCR and BaseTranslator define optional hooks (set_language, set_preprocess_config,
+    # clear_cache) that are deliberately empty and documented as "no-op by default".
+    "B027",
+    # The zip() calls pair lists that are aligned by construction. strict=True would turn a
+    # length mismatch into an exception inside a QThread, which aborts the whole process under
+    # PyQt6 instead of degrading gracefully.
+    "B905",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["langscope"]
+
+[tool.ruff.lint.per-file-ignores]
+# The scripts are command-line tools: what they print is their output.
+"scripts/*.py" = ["T201"]
+
+[tool.pyright]
+# The package. The tests and the command-line scripts are not type-checked.
+include = ["src/langscope"]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
+# "standard" is pyright's default. "basic" would switch off reportIncompatibleMethodOverride,
+# which this project wants on (see the Qt event handlers, which opt out one line at a time).
+typeCheckingMode = "standard"
+# The code is fully annotated; keep it that way.
+reportMissingParameterType = "error"

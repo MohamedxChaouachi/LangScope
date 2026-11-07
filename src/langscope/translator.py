@@ -2,19 +2,17 @@
 translator.py — Offline Translation via Argos Translate
 Fully local inference — no internet required after first-time package install.
 
+Call init_translation_backend() once at startup, before translating or installing packs.
+Importing this module changes nothing: no directory is created and no setting is touched.
+
 Package cache:
   Argos Translate uses a platform-specific data directory.  On Windows this
   ends up as C:\\Users\\<user>\\.local\\share\\argos-translate\\ (XDG-style),
-  NOT under %%LOCALAPPDATA%%.  We pin the path explicitly at import time so
-  that get_installed_packages() reliably finds already-downloaded models and
-  never triggers a spurious re-download.
+  NOT under %%LOCALAPPDATA%%.  init_translation_backend() makes sure the packages directory
+  exists and sets data_dir to a Path and package_data_dir to a str under it.
 
-Optimizations added (Phase 1):
-  • Translation cache — identical (text, from, to) tuples are never sent to
-    Argos twice.  Cache is bounded to _CACHE_MAX entries and flushed on
-    language-pair change.  Expected gain: eliminates 100% of repeated
-    translation calls on static or slowly-changing screens.
-  • Structured logging — DEBUG-level hits/misses, timing, and errors.
+Caching is not done here: TranslationWorker keeps the one (bounded) translation cache, above
+the BaseTranslator interface, so every engine benefits and nothing is cached twice.
 """
 
 from __future__ import annotations
@@ -23,29 +21,34 @@ import logging
 import os
 import pathlib
 import re
-import time
 import threading
+import time
 from typing import Any
+
+# These packages are heavy, and CI does not install them, so pyright cannot resolve them there.
+import argostranslate.package  # pyright: ignore[reportMissingImports]
+import argostranslate.settings as _argo_settings  # pyright: ignore[reportMissingImports]
+import argostranslate.translate  # pyright: ignore[reportMissingImports]
+import ctranslate2  # pyright: ignore[reportMissingImports]
 
 log = logging.getLogger("langscope.translator")
 
-# ── Pin argostranslate's data directory BEFORE importing submodules ────────────
-# Without this, get_installed_packages() may return [] even when packages exist
-# because argostranslate.settings resolves the path lazily and inconsistently
-# across import order on Windows.
-# pyrefly: ignore [missing-import]
-import argostranslate.settings as _argo_settings
+# ─────────────────────────────────────────────────────────────────────────────
+# Start-up configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
-_DATA_DIR = pathlib.Path(_argo_settings.data_dir)      # e.g. ~/.local/share/argos-translate
-_PACKAGES_DIR = _DATA_DIR / "packages"
-_PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Keep data_dir as a Path — argostranslate internals use the / operator on it
-# (e.g. sbd.py: settings.data_dir / "minisbd").  Only package_data_dir is str.
-_argo_settings.data_dir = _DATA_DIR
-_argo_settings.package_data_dir = str(_PACKAGES_DIR)
+def _pin_data_directories() -> None:
+    """Create Argos' packages directory and give the two settings the types its code expects.
 
-log.info(f"[Translator] Package cache: {_PACKAGES_DIR}")
+    data_dir stays a Path: Argos uses the / operator on it (for example sbd.py builds
+    settings.data_dir / "minisbd"). Only package_data_dir is a str."""
+    data_dir = pathlib.Path(_argo_settings.data_dir)  # e.g. ~/.local/share/argos-translate
+    packages_dir = data_dir / "packages"
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    _argo_settings.data_dir = data_dir
+    _argo_settings.package_data_dir = str(packages_dir)
+    log.info("[Translator] Package cache: %s", packages_dir)
 
 
 def _configure_inference_device() -> None:
@@ -58,123 +61,92 @@ def _configure_inference_device() -> None:
     first loaded), so assigning them here is early enough.
     """
     if os.environ.get("ARGOS_DEVICE_TYPE"):
-        print(f"[Translator] Device (from env): {_argo_settings.device}")
+        log.info("[Translator] Device (from env): %s", _argo_settings.device)
         return
     try:
-        import ctranslate2
         if ctranslate2.get_cuda_device_count() > 0:
             _argo_settings.device = "cuda"
             if not os.environ.get("ARGOS_COMPUTE_TYPE"):
                 if "float16" in ctranslate2.get_supported_compute_types("cuda"):
                     _argo_settings.compute_type = "float16"
-            print(f"[Translator] Device: CUDA ({_argo_settings.compute_type})")
+            log.info("[Translator] Device: CUDA (%s)", _argo_settings.compute_type)
             return
     except Exception as exc:
-        print(f"[Translator] CUDA probe failed ({exc}).")
-    print("[Translator] Device: CPU")
+        log.warning("[Translator] CUDA probe failed (%s).", exc)
+    log.info("[Translator] Device: CPU")
 
 
-_configure_inference_device()
+def init_translation_backend() -> None:
+    """Set up Argos for this process: its data directories and the inference device.
 
-# pyrefly: ignore [missing-import]
-import argostranslate.package
-# pyrefly: ignore [missing-import]
-import argostranslate.translate
-# pyrefly: ignore [missing-import]
-import ctranslate2
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Translation cache  (Goal 1)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Maximum number of (text, from_code, to_code) → translated entries to keep.
-# Older entries are evicted in FIFO order when the limit is reached.
-_CACHE_MAX = 512
-
-# The cache itself: key = (text, from_code, to_code), value = translated str.
-_translation_cache: dict[tuple[str, str, str], str] = {}
-
-# Insertion-order list used for O(1) FIFO eviction.
-_cache_order:  list[tuple[str, str, str]] = []
-
-# Thread-safe access — translate_text may be called from the capture thread
-# while clear_translation_cache is called from the main thread.
-_cache_lock = threading.Lock()
-
-# Lifetime counters for debugging / metrics.
-_cache_hits:   int = 0
-_cache_misses: int = 0
-
-
-def _cache_put(key: tuple[str, str, str], value: str) -> None:
-    """Insert *key→value* into the cache, evicting the oldest entry if full.
-    Must be called while holding *_cache_lock*."""
-    global _translation_cache, _cache_order
-    if len(_translation_cache) >= _CACHE_MAX:
-        oldest = _cache_order.pop(0)
-        _translation_cache.pop(oldest, None)
-    _translation_cache[key] = value
-    _cache_order.append(key)
-
-
-def clear_translation_cache() -> None:
-    """Flush the entire translation cache.
-
-    Should be called whenever the source or target language changes so that
-    cached translations for the old pair are not accidentally reused.
-    """
-    global _translation_cache, _cache_order, _cache_hits, _cache_misses
-    with _cache_lock:
-        _translation_cache.clear()
-        _cache_order.clear()
-        _cache_hits   = 0
-        _cache_misses = 0
-    log.debug("[Translator] Translation cache cleared.")
-
-
-def get_cache_stats() -> dict[str, Any]:
-    """Return a snapshot of translation-cache statistics for debugging/metrics."""
-    with _cache_lock:
-        return {
-            "size":   len(_translation_cache),
-            "hits":   _cache_hits,
-            "misses": _cache_misses,
-            "max":    _CACHE_MAX,
-        }
+    Call once at startup, before translating or installing language packs."""
+    _pin_data_directories()
+    _configure_inference_device()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cache helpers
+# Installed language packs
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+# Argos ships a pack between English and every other language, plus a few direct pairs such as
+# es <-> pt. For any other pair it chains two packs through English at translation time, so
+# setting such a pair up means having both packs.
+PIVOT_LANGUAGE = "en"
+
+
+def _pivot_legs(from_code: str, to_code: str) -> tuple[tuple[str, str], tuple[str, str]] | None:
+    """The two packs (from → English, English → to) that a pivoted pair needs.
+
+    None when pivoting does not apply, because English is already one end of the pair."""
+    if PIVOT_LANGUAGE in (from_code, to_code):
+        return None
+    return (from_code, PIVOT_LANGUAGE), (PIVOT_LANGUAGE, to_code)
+
 
 def is_package_installed(from_code: str, to_code: str) -> bool:
-    """Return True if the *from_code* → *to_code* package is already on disk."""
-    installed = argostranslate.package.get_installed_packages()
-    return any(
-        p.from_code == from_code and p.to_code == to_code
-        for p in installed
-    )
+    """Return True if *from_code* → *to_code* can be translated with what is on disk.
+
+    That is the case when the direct pack is installed, or when both packs of the pivot
+    through English are."""
+    installed = set(get_installed_pairs())
+    if (from_code, to_code) in installed:
+        return True
+    legs = _pivot_legs(from_code, to_code)
+    return legs is not None and all(leg in installed for leg in legs)
 
 
 def get_installed_pairs() -> list[tuple[str, str]]:
     """Return all (from_code, to_code) pairs that are cached locally."""
-    return [
-        (p.from_code, p.to_code)
-        for p in argostranslate.package.get_installed_packages()
-    ]
+    return [(p.from_code, p.to_code) for p in argostranslate.package.get_installed_packages()]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Setup — call once before the translation loop, or on language change
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+def _install_package(pkg: Any) -> bool:
+    """Download and install one language pack. Returns False (after logging) if that fails."""
+    pair = f"{pkg.from_code} → {pkg.to_code}"
+    log.info("[Translator] ⬇  Downloading %s language pack (~100 MB)…", pair)
+    try:
+        argostranslate.package.install_from_path(pkg.download())
+    except Exception as exc:
+        log.error("[Translator] ❌ Installation failed for %s: %s", pair, exc)
+        return False
+    log.info("[Translator] ✅ Package %s installed and cached.", pair)
+    return True
+
+
 def setup_translation_models(from_code: str, to_code: str) -> bool:
     """
-    Ensure the *from_code* → *to_code* language pack is installed locally.
+    Ensure *from_code* → *to_code* can be translated with locally installed packs.
 
-    * If the pack is already cached → returns True immediately (no network).
-    * If not → fetches the package index, downloads and installs (~100 MB).
+    * If it can already → returns True immediately (no network).
+    * If the package index offers a direct pack → downloads and installs it (~100 MB).
+    * Otherwise → pivots through English: installs whichever of from → English and
+      English → to is missing. Nothing is downloaded unless every missing pack is in the index.
     * Same-language pairs (en→en) are a no-op and return True immediately.
 
     Args:
@@ -182,66 +154,77 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
         to_code:   BCP-47 target language code, e.g. ``"fr"``.
 
     Returns:
-        True if the package is ready to use, False if setup failed.
+        True if the pair is ready to use, False if setup failed.
     """
     pair = f"{from_code} → {to_code}"
 
     # Same language — nothing to translate, always "ready"
     if from_code == to_code:
-        log.info(f"[Translator] Same language ({from_code}), skipping setup.")
+        log.info("[Translator] Same language (%s), skipping setup.", from_code)
         return True
 
     # ── Already cached on disk? ────────────────────────────────────────────
     if is_package_installed(from_code, to_code):
-        log.info(f"[Translator] ✅ Package {pair} already cached — ready.")
+        log.info("[Translator] ✅ Package %s already cached — ready.", pair)
         return True
 
     # ── Fetch package index ────────────────────────────────────────────────
-    log.info(f"[Translator] Fetching Argos Translate package index…")
+    log.info("[Translator] Fetching Argos Translate package index…")
     try:
         argostranslate.package.update_package_index()
     except Exception as exc:
-        log.warning(f"[Translator] ⚠  Could not update package index: {exc}")
+        log.warning("[Translator] ⚠  Could not update package index: %s", exc)
         # Fall through — we may still find the package in a stale index
 
-    # ── Locate the package ─────────────────────────────────────────────────
-    available = argostranslate.package.get_available_packages()
-    pkg = next(
-        (p for p in available if p.from_code == from_code and p.to_code == to_code),
-        None,
-    )
-    if pkg is None:
+    # ── Decide which packs are needed ──────────────────────────────────────
+    available: dict[tuple[str, str], Any] = {}
+    for p in argostranslate.package.get_available_packages():
+        available.setdefault((p.from_code, p.to_code), p)
+
+    needed: list[Any] = []
+    direct = available.get((from_code, to_code))
+    if direct is not None:
+        needed = [direct]
+    else:
+        legs = _pivot_legs(from_code, to_code)
+        if legs is not None:
+            installed = set(get_installed_pairs())
+            missing = [leg for leg in legs if leg not in installed]
+            if not missing:  # a pack finished installing since the check above
+                return True
+            if all(leg in available for leg in missing):
+                needed = [available[leg] for leg in missing]
+                log.info("[Translator] No direct %s pack — pivoting through English.", pair)
+            else:
+                unavailable = [leg for leg in missing if leg not in available]
+                log.error(
+                    "[Translator] ❌ No package found for %s: no direct pack, and the index lacks %s.",
+                    pair,
+                    ", ".join(f"{a} → {b}" for a, b in unavailable),
+                )
+                return False
+
+    if not needed:
         log.error(
-            f"[Translator] ❌ No package found for {pair}.\n"
-            "  Available pairs: https://www.argosopentech.com/argospm/index/"
+            "[Translator] ❌ No package found for %s.\n"
+            "  Available pairs: https://www.argosopentech.com/argospm/index/",
+            pair,
         )
         return False
 
     # ── Download & install ─────────────────────────────────────────────────
-    log.info(f"[Translator] ⬇  Downloading {pair} language pack (~100 MB)…")
-    try:
-        download_path = pkg.download()
-        argostranslate.package.install_from_path(download_path)
-        log.info(f"[Translator] ✅ Package {pair} installed and cached.")
-        return True
-    except Exception as exc:
-        log.error(f"[Translator] ❌ Installation failed for {pair}: {exc}")
-        return False
+    return all(_install_package(pkg) for pkg in needed)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Translation  (with cache, Goal 1)
+# Translating one text
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def translate_text(text: str, from_code: str, to_code: str) -> str:
     """
     Translate *text* from *from_code* to *to_code* using the locally cached
-    Argos Translate model.
-
-    Cache behaviour:
-      • On a cache HIT  the translated string is returned instantly (no Argos
-        call, no CPU/GPU cost).
-      • On a cache MISS the result is translated, stored, and returned.
+    Argos Translate model. Results are not cached here; TranslationWorker does that.
 
     Uses the explicit installed-languages API instead of the convenience
     wrapper, which can silently return None when duplicate package entries
@@ -249,32 +232,13 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
 
     Returns the translated string, or the original *text* on failure.
     """
-    global _cache_hits, _cache_misses
-
     if not text.strip():
         return text
 
     if from_code == to_code:
         return text  # nothing to translate
 
-    cache_key = (text, from_code, to_code)
-
-    # ── Cache lookup ───────────────────────────────────────────────────────
-    with _cache_lock:
-        if cache_key in _translation_cache:
-            _cache_hits += 1
-            log.debug(
-                "[Translator] CACHE HIT  (%s→%s) hits=%d misses=%d  %r",
-                from_code, to_code, _cache_hits, _cache_misses, text[:40],
-            )
-            return _translation_cache[cache_key]
-        _cache_misses += 1
-
-    log.debug(
-        "[Translator] CACHE MISS (%s→%s) hits=%d misses=%d  %r",
-        from_code, to_code, _cache_hits, _cache_misses, text[:40],
-    )
-    log.debug(f"[Translator] Translating ({from_code}->{to_code}): {text[:50]!r}")
+    log.debug("[Translator] Translating (%s->%s): %r", from_code, to_code, text[:50])
 
     # ── Argos Translate call ───────────────────────────────────────────────
     t0 = time.perf_counter()
@@ -289,17 +253,21 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
                 seen.add(lang.code)
                 unique_langs.append(lang)
 
-        from_lang = next((l for l in unique_langs if l.code == from_code), None)
-        to_lang   = next((l for l in unique_langs if l.code == to_code),   None)
+        from_lang = next((lang for lang in unique_langs if lang.code == from_code), None)
+        to_lang = next((lang for lang in unique_langs if lang.code == to_code), None)
 
         if from_lang is None or to_lang is None:
-            log.warning(f"[Translator] ⚠  Language not found — from={from_lang}, to={to_lang}. "
-                        f"Available: {[l.code for l in unique_langs]}")
+            log.warning(
+                "[Translator] ⚠  Language not found — from=%s, to=%s. Available: %s",
+                from_lang,
+                to_lang,
+                [lang.code for lang in unique_langs],
+            )
             return text
 
         translation = from_lang.get_translation(to_lang)
         if translation is None:
-            log.warning(f"[Translator] ⚠  No translation path for {from_code}->{to_code}")
+            log.warning("[Translator] ⚠  No translation path for %s->%s", from_code, to_code)
             return text
 
         result = translation.translate(text)
@@ -307,20 +275,16 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
 
         log.debug(
             "[Translator] translate_text done in %.1f ms (%s→%s)",
-            elapsed_ms, from_code, to_code,
+            elapsed_ms,
+            from_code,
+            to_code,
         )
-        log.debug(f"[Translator] OK Result: {result[:50]!r}")
+        log.debug("[Translator] OK Result: %r", result[:50])
 
-        final = result.strip() if result and result.strip() else text
-
-        # ── Store in cache ─────────────────────────────────────────────────
-        with _cache_lock:
-            _cache_put(cache_key, final)
-
-        return final
+        return result.strip() if result and result.strip() else text
 
     except Exception as exc:
-        log.error(f"[Translator] ERR Exception ({from_code}->{to_code}): {exc}")
+        log.error("[Translator] ERR Exception (%s->%s): %s", from_code, to_code, exc)
         return text
 
 
@@ -342,17 +306,17 @@ _SENTENCE_BREAK_RE = re.compile(r"[.!?;:。！？]\s*\S")
 _model_load_lock = threading.Lock()
 
 
-def _get_translation(from_code: str, to_code: str):
+def _get_translation(from_code: str, to_code: str) -> Any:
     """Return Argos' ITranslation for the pair, or None if unavailable."""
     installed = argostranslate.translate.get_installed_languages()
-    from_lang = next((l for l in installed if l.code == from_code), None)
-    to_lang   = next((l for l in installed if l.code == to_code),   None)
+    from_lang = next((lang for lang in installed if lang.code == from_code), None)
+    to_lang = next((lang for lang in installed if lang.code == to_code), None)
     if from_lang is None or to_lang is None:
         return None
     return from_lang.get_translation(to_lang)
 
 
-def _ensure_ct2_translator(pt) -> None:
+def _ensure_ct2_translator(pt: Any) -> None:
     """Load pt.translator (same arguments Argos uses). Falls back to CPU if
     the CUDA load fails."""
     if pt.translator is not None:
@@ -362,7 +326,7 @@ def _ensure_ct2_translator(pt) -> None:
             return
         model_path = str(pt.pkg.package_path / "model")
 
-        def _load():
+        def _load() -> Any:
             return ctranslate2.Translator(
                 model_path,
                 device=_argo_settings.device,
@@ -376,13 +340,13 @@ def _ensure_ct2_translator(pt) -> None:
         except Exception as exc:
             if _argo_settings.device != "cuda":
                 raise
-            print(f"[Translator] CUDA model load failed ({exc}) — falling back to CPU.")
+            log.warning("[Translator] CUDA model load failed (%s) — falling back to CPU.", exc)
             _argo_settings.device = "cpu"
             _argo_settings.compute_type = "auto"
             pt.translator = _load()
 
 
-def _split_sentences(pt, text: str) -> list[str]:
+def _split_sentences(pt: Any, text: str) -> list[str]:
     text = text.strip()
     if not text:
         return []
@@ -391,7 +355,7 @@ def _split_sentences(pt, text: str) -> list[str]:
     return pt.sentencizer.split_sentences(text)
 
 
-def _batch_package(pt, texts: list[str]) -> list[str]:
+def _batch_package(pt: Any, texts: list[str]) -> list[str]:
     """Translate texts with one translate_batch call on a PackageTranslation."""
     _ensure_ct2_translator(pt)
     pkg = pt.pkg
@@ -430,14 +394,14 @@ def _batch_package(pt, texts: list[str]) -> list[str]:
             k += 1
         value = pkg.tokenizer.decode(tokens)
         if pkg.target_prefix != "" and value.startswith(pkg.target_prefix):
-            value = value[len(pkg.target_prefix):]
+            value = value[len(pkg.target_prefix) :]
         if value.startswith(" "):
             value = value[1:]
         out.append(value.strip() or text)
     return out
 
 
-def _batch_translation(translation, texts: list[str]) -> list[str]:
+def _batch_translation(translation: Any, texts: list[str]) -> list[str]:
     """Dispatch on Argos' translation wrapper types."""
     if isinstance(translation, argostranslate.translate.CachedTranslation):
         return _batch_translation(translation.underlying, texts)
@@ -445,38 +409,31 @@ def _batch_translation(translation, texts: list[str]) -> list[str]:
         return _batch_package(translation, texts)
     if isinstance(translation, argostranslate.translate.CompositeTranslation):
         # Pivot translation (e.g. ro→en→fr): two batched hops.
-        return _batch_translation(translation.t2,
-                                  _batch_translation(translation.t1, texts))
+        return _batch_translation(translation.t2, _batch_translation(translation.t1, texts))
     if isinstance(translation, argostranslate.translate.IdentityTranslation):
         return list(texts)
     # Unknown wrapper type: slow path, still correct.
     return [translation.translate(t) for t in texts]
 
 
-def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
+def translate_many_with_status(
+    texts: list[str], from_code: str, to_code: str
+) -> tuple[list[str], list[bool]]:
     """
     Translate several independent strings with a single batched model call.
 
-    Returns a list aligned 1:1 with *texts*. Cached results are reused, blank
-    strings and same-language requests pass through unchanged, and any failure
-    returns the original text for the affected entries.
+    Returns a list aligned 1:1 with *texts*. Identical strings are translated
+    once, blank strings and same-language requests pass through unchanged, and
+    any failure returns the original text and a false success flag for the affected entries.
     """
-    global _cache_hits, _cache_misses
-
-    results: list[str | None] = [None] * len(texts)
-    pending: dict[str, list[int]] = {}      # unique text -> indices to fill
+    results = list(texts)
+    succeeded = [True] * len(texts)
+    pending: dict[str, list[int]] = {}  # unique text -> indices to fill
 
     for i, text in enumerate(texts):
         if not text.strip() or from_code == to_code:
             results[i] = text
             continue
-        with _cache_lock:
-            cached = _translation_cache.get((text, from_code, to_code))
-            if cached is not None:
-                _cache_hits += 1
-                results[i] = cached
-                continue
-            _cache_misses += 1
         pending.setdefault(text, []).append(i)
 
     if pending:
@@ -485,26 +442,36 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
         try:
             translation = _get_translation(from_code, to_code)
             if translation is None:
-                print(f"[Translator] ⚠  No translation path for {from_code}->{to_code}")
+                log.warning("[Translator] ⚠  No translation path for %s->%s", from_code, to_code)
                 translated = list(unique)
+                batch_succeeded = False
             else:
                 translated = _batch_translation(translation, unique)
-        except Exception as exc:
-            print(f"[Translator] ERR batch failed ({from_code}->{to_code}): {exc}")
-            log.exception("Batch translation failed")
+                batch_succeeded = True
+        except Exception:
+            log.exception("Batch translation failed (%s->%s)", from_code, to_code)
             translated = list(unique)
-        log.debug("[Translator] translate_many %d texts in %.1f ms",
-                  len(unique), (time.perf_counter() - t0) * 1000)
+            batch_succeeded = False
+        log.debug(
+            "[Translator] translate_many %d texts in %.1f ms",
+            len(unique),
+            (time.perf_counter() - t0) * 1000,
+        )
 
-        with _cache_lock:
-            for text, tx in zip(unique, translated):
-                if tx and tx != text:
-                    _cache_put((text, from_code, to_code), tx)
-        for text, tx in zip(unique, translated):
-            for i in pending[text]:
-                results[i] = tx
+        for unique_index, text in enumerate(unique):
+            tx = translated[unique_index] if unique_index < len(translated) else ""
+            successful = batch_succeeded and bool(tx and tx.strip())
+            for result_index in pending[text]:
+                results[result_index] = tx if successful else text
+                succeeded[result_index] = successful
 
-    return [r if r is not None else texts[i] for i, r in enumerate(results)]
+    return results, succeeded
+
+
+def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
+    """Translate several strings, falling back to the original for failed entries."""
+    translated, _ = translate_many_with_status(texts, from_code, to_code)
+    return translated
 
 
 def preload_model(from_code: str, to_code: str) -> bool:
@@ -516,11 +483,15 @@ def preload_model(from_code: str, to_code: str) -> bool:
     try:
         translation = _get_translation(from_code, to_code)
         if translation is None:
-            return False          # pack not installed (yet)
+            return False  # pack not installed (yet)
         _batch_translation(translation, ["Hello world"])
-        print(f"[Translator] Model {from_code}->{to_code} warmed up in "
-              f"{(time.perf_counter() - t0) * 1000:.0f} ms.")
+        log.info(
+            "[Translator] Model %s->%s warmed up in %.0f ms.",
+            from_code,
+            to_code,
+            (time.perf_counter() - t0) * 1000,
+        )
         return True
     except Exception as exc:
-        print(f"[Translator] Warm-up skipped ({exc})")
+        log.warning("[Translator] Warm-up skipped (%s)", exc)
         return False

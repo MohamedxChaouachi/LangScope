@@ -14,17 +14,18 @@ click-through desktop overlay stay visually consistent.
 
 No project-level dependencies beyond PyQt6 — safe to import from any UI module.
 """
+
 from __future__ import annotations
 
-from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 
-# Default appearance constants (previously duplicated inline in both widgets).
-_BG_COLOR   = QColor(10, 12, 30, 235)
+# Default appearance of the translated-text box.
+_BG_COLOR = QColor(10, 12, 30, 235)
 _TEXT_COLOR = QColor("#E0F7FA")
-_PADDING    = 8          # horizontal padding budget when fitting text (px)
-_TEXT_INSET = 4          # left/top inset of text inside the background (px)
-_MIN_FONT   = 6
-_HEIGHT_RATIO = 0.72     # initial font size as a fraction of bbox height
+_PADDING = 8  # horizontal padding budget when fitting text (px)
+_TEXT_INSET = 4  # left/top inset of text inside the background (px)
+_MIN_FONT = 6
+_HEIGHT_RATIO = 0.72  # initial font size as a fraction of bbox height
 
 
 def _wrap_lines(text: str, fm: QFontMetrics, max_width: int) -> list[str]:
@@ -48,19 +49,19 @@ def _wrap_lines(text: str, fm: QFontMetrics, max_width: int) -> list[str]:
 
 
 def draw_translated_text(
-    painter:      QPainter,
-    text:         str,
-    x1:           int,
-    y1:           int,
-    bw:           int,
-    bh:           int,
-    surface_w:    int,
-    surface_h:    int,
+    painter: QPainter,
+    text: str,
+    x1: int,
+    y1: int,
+    bw: int,
+    bh: int,
+    surface_w: int,
+    surface_h: int,
     *,
-    max_font_pt:  int | None = 24,
-    font_family:  str = "Segoe UI",
-    bg_color:     QColor = _BG_COLOR,
-    text_color:   QColor = _TEXT_COLOR,
+    max_font_pt: int | None = 24,
+    font_family: str = "Segoe UI",
+    bg_color: QColor = _BG_COLOR,
+    text_color: QColor = _TEXT_COLOR,
 ) -> None:
     """
     Draw `text` into the box at (x1, y1, bw, bh), fitting and wrapping as needed.
@@ -79,7 +80,7 @@ def draw_translated_text(
     surface_w/h  : dimensions of the drawing surface, used to clamp the
                    background so nothing renders off-window.
     max_font_pt  : optional upper bound on the font point size. Pass None for
-                   no cap (matches the previous OverlayWindow behaviour).
+                   no cap.
     """
     # Auto-size font to bbox height, then optionally cap.
     font_pt = max(_MIN_FONT, int(bh * _HEIGHT_RATIO))
@@ -96,13 +97,13 @@ def draw_translated_text(
         font_pt -= 1
         font.setPointSize(font_pt)
 
-    fm     = QFontMetrics(font)
+    fm = QFontMetrics(font)
     line_h = fm.height()
 
     # Word-wrap into lines that fit the box width.
-    lines    = _wrap_lines(text, fm, bw - _PADDING)
+    lines = _wrap_lines(text, fm, bw - _PADDING)
     needed_h = line_h * len(lines) + 4
-    bg_h     = max(bh, needed_h)
+    bg_h = max(bh, needed_h)
 
     # Clamp background to the drawing surface bounds.
     draw_x1 = max(0, x1)

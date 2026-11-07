@@ -7,9 +7,10 @@ apply_smoothing runs an Exponential Moving Average on each bbox corner:
 
 Nothing is mocked; TranslationRegion has no external dependencies.
 """
+
 import pytest
 
-from models import TranslationRegion
+from langscope.models import TranslationRegion
 
 
 def _square(x1, y1, x2, y2):
@@ -99,3 +100,35 @@ class TestApplySmoothing:
         for pt in region.smoothed_bbox:
             assert pt[0] == pytest.approx(10)
             assert pt[1] == pytest.approx(10)
+
+
+class TestSnapshot:
+    def test_copies_what_is_drawn(self):
+        region = _make_region(_square(0, 0, 10, 20))
+        region.confidence = 0.8
+        snap = region.snapshot()
+        assert snap.region_id == region.region_id
+        assert snap.original_text == "hello"
+        assert snap.translated_text == "bonjour"
+        assert snap.confidence == pytest.approx(0.8)
+        assert snap.smoothed_bbox == ((0.0, 0.0), (10.0, 0.0), (10.0, 20.0), (0.0, 20.0))
+        assert snap.has_translation
+
+    def test_is_frozen(self):
+        snap = _make_region(_square(0, 0, 10, 10)).snapshot()
+        with pytest.raises(AttributeError):  # dataclasses.FrozenInstanceError
+            snap.translated_text = "changed"
+
+    def test_does_not_follow_later_changes_to_the_region(self):
+        region = _make_region(_square(0, 0, 10, 10))
+        snap = region.snapshot()
+        region.apply_smoothing(_square(100, 100, 110, 110), alpha=1.0)
+        region.translated_text = "salut"
+        assert snap.smoothed_bbox[0] == (0.0, 0.0)
+        assert snap.translated_text == "bonjour"
+
+    def test_untranslated_text_has_no_translation(self):
+        region = TranslationRegion(
+            bbox=_square(0, 0, 10, 10), original_text="same", translated_text="same"
+        )
+        assert not region.snapshot().has_translation

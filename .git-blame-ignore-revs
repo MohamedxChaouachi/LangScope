@@ -1,0 +1,11 @@
+# Commits that only reformat code or move it, so they say nothing about who wrote a line.
+# GitHub's blame view skips the revisions listed here.
+# Locally, enable the same behaviour with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply ruff format
+1a03f5d3268ad9d6ea137d1be97d934e0368cee7
+
+# refactor: move the application into the src/langscope package
+# (renames the files and rewrites their import lines; the code is otherwise identical)
+af11ec60897325958fc1fb6a5ca14fae52b9a287

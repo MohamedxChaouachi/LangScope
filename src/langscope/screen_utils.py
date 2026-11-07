@@ -16,12 +16,13 @@ Qt keeps each QScreen's top-left in native coordinates and only divides the
 A region never spans two screens (it is drawn on one screen), so every
 conversion is done relative to a single QScreen.
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QGuiApplication, QScreen
+
+from langscope.models import Region
 
 
 def screen_native_rect(screen: QScreen) -> QRect:
@@ -36,7 +37,10 @@ def screen_at_native_point(x: int, y: int) -> QScreen:
     for s in QGuiApplication.screens():
         if screen_native_rect(s).contains(x, y):
             return s
-    return QGuiApplication.primaryScreen()
+    primary = QGuiApplication.primaryScreen()
+    if primary is None:  # Qt reports no primary screen when there are no screens at all
+        raise RuntimeError("No screen is available")
+    return primary
 
 
 def screen_index(screen: QScreen) -> int:
@@ -54,29 +58,29 @@ def local_rect_to_native(screen: QScreen, rect: QRect) -> tuple[int, int, int, i
     """
     g = screen.geometry()
     d = screen.devicePixelRatio()
-    left   = g.x() + round(rect.left() * d)
-    top    = g.y() + round(rect.top()  * d)
-    width  = max(1, round(rect.width()  * d))
+    left = g.x() + round(rect.left() * d)
+    top = g.y() + round(rect.top() * d)
+    width = max(1, round(rect.width() * d))
     height = max(1, round(rect.height() * d))
     return top, left, width, height
 
 
-def native_region_to_logical(region: dict) -> tuple[QRect, float, Optional[QScreen]]:
+def native_region_to_logical(region: Region) -> tuple[QRect, float, QScreen]:
     """
-    Convert a native-pixel region dict ({"top","left","width","height"}) to a
-    logical QRect suitable for QWidget.setGeometry().
+    Convert a native-pixel Region to a logical QRect suitable for
+    QWidget.setGeometry().
 
     Returns (logical_rect, device_pixel_ratio, screen).
     """
-    cx = region["left"] + region["width"]  // 2
-    cy = region["top"]  + region["height"] // 2
+    cx = region["left"] + region["width"] // 2
+    cy = region["top"] + region["height"] // 2
     screen = screen_at_native_point(cx, cy)
     g = screen.geometry()
     d = screen.devicePixelRatio() or 1.0
     rect = QRect(
         g.x() + round((region["left"] - g.x()) / d),
-        g.y() + round((region["top"]  - g.y()) / d),
-        max(1, round(region["width"]  / d)),
+        g.y() + round((region["top"] - g.y()) / d),
+        max(1, round(region["width"] / d)),
         max(1, round(region["height"] / d)),
     )
     return rect, d, screen

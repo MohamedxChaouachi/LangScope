@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# The workflow only reads the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request replaces a run that is still going.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff) and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      # The one place the ruff pin lives is requirements-ci.txt (tests/test_packaging.py keeps
+      # it equal to pyproject.toml), so read it from there instead of repeating it here. ruff
+      # needs nothing else installed.
+      - name: Install ruff
+        run: pip install "$(grep -E '^ruff' requirements-ci.txt)"
+      - name: Lint
+        run: ruff check .
+      - name: Check formatting
+        run: ruff format --check .
+      # A package that imports from the source tree can still be missing its assets or its
+      # entry point once it is installed, which only shows in the built wheel.
+      - name: Build the wheel
+        run: |
+          pip install build
+          python -m build --wheel
+      - name: Check the wheel
+        run: python scripts/check_wheel.py dist/*.whl
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }}, Windows)
+    # LangScope supports Windows only, so the tests run there.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported release and the newest stable one. Python 3.10 reached end of life
+        # on 2026-10-01.
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      # Not the package's own dependencies: CI does not install torch, easyocr or
+      # argostranslate. Tests that need them skip themselves, and -ra (set in pyproject.toml)
+      # lists each skip with its reason. The tests import the package from src/ (pytest's
+      # pythonpath setting), so the package itself is not installed either.
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements-ci.txt
+      - name: Run tests
+        run: .\.venv\Scripts\python.exe -m pytest
+      # Type-check in the same environment as the tests: it has PyQt6, numpy and OpenCV for
+      # pyright to read. The packages CI does not install carry scoped ignores in the code.
+      - name: Type-check
+        run: .\.venv\Scripts\pyright.exe
