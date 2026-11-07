@@ -5,6 +5,7 @@ EasyOCR's reader takes seconds to build and, for a language it has not seen, dow
 200 MB first. Building it in OCRWorker.__init__ or in set_language() froze the window.
 """
 
+import logging
 import sys
 import threading
 import time
@@ -253,3 +254,82 @@ class TestEasyOCRProviderIsLazy:
         provider.set_language("en")
         provider.load()
         assert [langs for langs, _ in fake_easyocr.readers] == [("en",), ("ja",)]
+
+
+class TestGpuOutOfMemory:
+    """On the GPU, a frame that runs out of VRAM is retried with smaller recognition batches
+    instead of being dropped."""
+
+    class Reader:
+        def __init__(self, fail_until_batch):
+            self.fail_until_batch = fail_until_batch
+            self.batch_sizes = []
+
+        def readtext(self, img, detail=1, batch_size=1):
+            self.batch_sizes.append(batch_size)
+            # Not "out of memory", so the code under test does not swallow it as a retry.
+            assert len(self.batch_sizes) < 12, "the retry loop does not end"
+            if batch_size > self.fail_until_batch:
+                raise RuntimeError("CUDA out of memory. Tried to allocate 20.00 MiB")
+            return []
+
+    @pytest.fixture
+    def gpu(self, monkeypatch):
+        import ocr_providers
+
+        torch = types.ModuleType("torch")
+        torch.cuda = types.SimpleNamespace(empty_cache=lambda: torch.cleared.append(1))
+        torch.cleared = []
+        monkeypatch.setitem(sys.modules, "torch", torch)
+        monkeypatch.setattr(ocr_providers.BACKEND, "use_gpu", True)
+        monkeypatch.setattr(ocr_providers.BACKEND, "batch_size", 16)
+        return torch
+
+    def provider(self):
+        from ocr_providers import EasyOCRProvider
+
+        return EasyOCRProvider("en")
+
+    def test_the_batch_is_halved_until_the_frame_fits(self, gpu, caplog):
+        provider = self.provider()
+        reader = self.Reader(fail_until_batch=4)
+        with caplog.at_level(logging.WARNING, logger="langscope.ocr_providers"):
+            provider._readtext(reader, np.zeros((30, 30), np.uint8))
+        assert reader.batch_sizes == [16, 8, 4]
+        assert provider._batch_size == 4  # and it stays small for the next frames
+        assert len(gpu.cleared) == 2
+        assert [r.getMessage() for r in caplog.records if "out of memory" in r.getMessage()] == [
+            "[OCR] GPU out of memory — retrying with batch_size=8.",
+            "[OCR] GPU out of memory — retrying with batch_size=4.",
+        ]
+
+    def test_it_gives_up_when_even_one_box_does_not_fit(self, gpu):
+        provider = self.provider()
+        reader = self.Reader(fail_until_batch=0)
+        with pytest.raises(RuntimeError, match="out of memory"):
+            provider._readtext(reader, np.zeros((30, 30), np.uint8))
+        assert reader.batch_sizes == [16, 8, 4, 2, 1]
+
+    def test_other_errors_are_not_retried(self, gpu):
+        class Broken:
+            calls = 0
+
+            def readtext(self, img, detail=1, batch_size=1):
+                Broken.calls += 1
+                raise ValueError("bad image")
+
+        with pytest.raises(ValueError):
+            self.provider()._readtext(Broken(), np.zeros((30, 30), np.uint8))
+        assert Broken.calls == 1
+
+    def test_on_the_cpu_an_out_of_memory_error_is_not_retried(self, monkeypatch):
+        import ocr_providers
+
+        # The batch size is above 1 here so that it is the missing GPU, not a batch of one,
+        # that rules out a retry. (Emptying the CUDA cache means nothing without a GPU.)
+        monkeypatch.setattr(ocr_providers.BACKEND, "use_gpu", False)
+        monkeypatch.setattr(ocr_providers.BACKEND, "batch_size", 16)
+        reader = self.Reader(fail_until_batch=0)
+        with pytest.raises(RuntimeError, match="out of memory"):
+            self.provider()._readtext(reader, np.zeros((30, 30), np.uint8))
+        assert reader.batch_sizes == [16]

@@ -66,7 +66,7 @@ def _configure_inference_device() -> None:
     first loaded), so assigning them here is early enough.
     """
     if os.environ.get("ARGOS_DEVICE_TYPE"):
-        print(f"[Translator] Device (from env): {_argo_settings.device}")
+        log.info("[Translator] Device (from env): %s", _argo_settings.device)
         return
     try:
         if ctranslate2.get_cuda_device_count() > 0:
@@ -74,11 +74,11 @@ def _configure_inference_device() -> None:
             if not os.environ.get("ARGOS_COMPUTE_TYPE"):
                 if "float16" in ctranslate2.get_supported_compute_types("cuda"):
                     _argo_settings.compute_type = "float16"
-            print(f"[Translator] Device: CUDA ({_argo_settings.compute_type})")
+            log.info("[Translator] Device: CUDA (%s)", _argo_settings.compute_type)
             return
     except Exception as exc:
-        print(f"[Translator] CUDA probe failed ({exc}).")
-    print("[Translator] Device: CPU")
+        log.warning("[Translator] CUDA probe failed (%s).", exc)
+    log.info("[Translator] Device: CPU")
 
 
 def init_translation_backend() -> None:
@@ -343,7 +343,7 @@ def _ensure_ct2_translator(pt) -> None:
         except Exception as exc:
             if _argo_settings.device != "cuda":
                 raise
-            print(f"[Translator] CUDA model load failed ({exc}) — falling back to CPU.")
+            log.warning("[Translator] CUDA model load failed (%s) — falling back to CPU.", exc)
             _argo_settings.device = "cpu"
             _argo_settings.compute_type = "auto"
             pt.translator = _load()
@@ -442,13 +442,12 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
         try:
             translation = _get_translation(from_code, to_code)
             if translation is None:
-                print(f"[Translator] ⚠  No translation path for {from_code}->{to_code}")
+                log.warning("[Translator] ⚠  No translation path for %s->%s", from_code, to_code)
                 translated = list(unique)
             else:
                 translated = _batch_translation(translation, unique)
-        except Exception as exc:
-            print(f"[Translator] ERR batch failed ({from_code}->{to_code}): {exc}")
-            log.exception("Batch translation failed")
+        except Exception:
+            log.exception("Batch translation failed (%s->%s)", from_code, to_code)
             translated = list(unique)
         log.debug(
             "[Translator] translate_many %d texts in %.1f ms",
@@ -474,11 +473,13 @@ def preload_model(from_code: str, to_code: str) -> bool:
         if translation is None:
             return False  # pack not installed (yet)
         _batch_translation(translation, ["Hello world"])
-        print(
-            f"[Translator] Model {from_code}->{to_code} warmed up in "
-            f"{(time.perf_counter() - t0) * 1000:.0f} ms."
+        log.info(
+            "[Translator] Model %s->%s warmed up in %.0f ms.",
+            from_code,
+            to_code,
+            (time.perf_counter() - t0) * 1000,
         )
         return True
     except Exception as exc:
-        print(f"[Translator] Warm-up skipped ({exc})")
+        log.warning("[Translator] Warm-up skipped (%s)", exc)
         return False

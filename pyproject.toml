@@ -21,6 +21,7 @@ select = [
     "UP",  # pyupgrade: modern syntax for the target Python version
     "B",   # flake8-bugbear: likely bugs and design problems
     "I",   # isort: import ordering
+    "T20", # flake8-print: application code logs, it does not print
 ]
 ignore = [
     # BaseOCR and BaseTranslator define optional hooks (set_language, set_preprocess_config,
@@ -31,3 +32,7 @@ ignore = [
     # PyQt6 instead of degrading gracefully.
     "B905",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# bench_ocr.py is a command-line tool: its printed report is its output.
+"bench_ocr.py" = ["T201"]

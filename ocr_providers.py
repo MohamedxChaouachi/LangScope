@@ -299,7 +299,9 @@ class EasyOCRProvider(BaseOCR):
 
                 torch.cuda.empty_cache()
                 self._batch_size = max(1, self._batch_size // 2)
-                print(f"[OCR] GPU out of memory — retrying with batch_size={self._batch_size}.")
+                log.warning(
+                    "[OCR] GPU out of memory — retrying with batch_size=%d.", self._batch_size
+                )
 
     # ── Reader cache ──────────────────────────────────────────────────────────
 

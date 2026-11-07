@@ -10,6 +10,7 @@ the real Argos data directory or the GPU.
 """
 
 import importlib
+import logging
 import pathlib
 import sys
 import types
@@ -107,14 +108,32 @@ class TestTranslationBackend:
         assert fake_argos.settings.compute_type == "auto"
 
     def test_a_failing_gpu_probe_falls_back_to_the_cpu(
-        self, fake_argos, translator_module, monkeypatch
+        self, fake_argos, translator_module, monkeypatch, caplog
     ):
         def broken():
             raise RuntimeError("the CUDA driver is too old")
 
         monkeypatch.setattr(fake_argos.modules["ctranslate2"], "get_cuda_device_count", broken)
-        translator_module.init_translation_backend()  # must not raise
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            translator_module.init_translation_backend()  # must not raise
         assert fake_argos.settings.device == "cpu"
+        (warning,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert "the CUDA driver is too old" in warning.getMessage()
+
+    def test_the_chosen_device_is_logged(self, fake_argos, translator_module, gpu, caplog, capsys):
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            translator_module.init_translation_backend()
+        messages = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+        assert "[Translator] Device: CUDA (float16)" in messages
+        assert capsys.readouterr().out == ""
+
+    def test_a_device_from_the_environment_is_logged_as_such(
+        self, fake_argos, translator_module, caplog, monkeypatch
+    ):
+        monkeypatch.setenv("ARGOS_DEVICE_TYPE", "cpu")
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            translator_module.init_translation_backend()
+        assert "[Translator] Device (from env): cpu" in [r.getMessage() for r in caplog.records]
 
 
 class FakeTorch(types.ModuleType):

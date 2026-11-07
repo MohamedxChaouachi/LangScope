@@ -428,3 +428,82 @@ class TestModelLoading:
         texts = ["Hello world", "", "Good morning"]
         assert translate_many(texts, "en", "fr") == texts
         assert len(fake_argos.model_loads) == 1  # no fallback from the CPU
+
+
+class TestPreloadModel:
+    """preload_model loads the model and runs a tiny batch, so that the first real translation
+    does not pay the load cost."""
+
+    def test_it_loads_the_model_and_reports_success(self, translator_module, fake_argos, caplog):
+        pack = fake_argos.pair("en", "fr", loaded=False)
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            assert translator_module.preload_model("en", "fr") is True
+        assert pack.underlying.translator is fake_argos.model("en", "fr")
+        assert sent(fake_argos.model("en", "fr")) == ["Hello world"]
+        (record,) = [r for r in caplog.records if "warmed up" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert "en->fr" in record.getMessage()
+
+    def test_a_pair_that_is_not_installed_is_not_ready(self, translator_module, fake_argos):
+        assert translator_module.preload_model("en", "fr") is False
+
+    def test_the_same_language_needs_no_model(self, translator_module, fake_argos):
+        assert translator_module.preload_model("en", "en") is True
+        assert fake_argos.language_lookups == 0
+
+    def test_a_failure_is_reported_as_not_ready_and_logged_as_a_warning(
+        self, translator_module, fake_argos, caplog
+    ):
+        fake_argos.pair("en", "fr")
+        fake_argos.model("en", "fr").error = RuntimeError("out of memory")
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            assert translator_module.preload_model("en", "fr") is False
+        (record,) = [r for r in caplog.records if "Warm-up skipped" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert "out of memory" in record.getMessage()
+
+
+class TestLogMessages:
+    def test_a_missing_translation_path_is_a_warning_that_names_the_pair(
+        self, translate_many, fake_argos, caplog
+    ):
+        fake_argos.language("en")
+        fake_argos.language("ja")
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            translate_many(["Hello world"], "en", "ja")
+        (record,) = [r for r in caplog.records if "No translation path" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert "en->ja" in record.getMessage()
+
+    def test_a_batch_failure_names_the_pair_and_keeps_the_traceback(
+        self, translate_many, fake_argos, caplog
+    ):
+        fake_argos.pair("en", "fr")
+        fake_argos.model("en", "fr").error = RuntimeError("boom")
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            translate_many(["Hello world"], "en", "fr")
+        (record,) = [r for r in caplog.records if "Batch translation failed" in r.getMessage()]
+        assert record.levelno == logging.ERROR
+        assert "en->fr" in record.getMessage()
+        assert record.exc_info and "boom" in str(record.exc_info[1])
+
+    def test_a_cuda_load_failure_is_a_warning_before_the_cpu_fallback(
+        self, translate_many, fake_argos, caplog
+    ):
+        fake_argos.settings.device = "cuda"
+        fake_argos.model_load_errors["cuda"] = RuntimeError("CUDA out of memory")
+        fake_argos.pair("en", "fr", loaded=False)
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            translate_many(["Hello world"], "en", "fr")
+        (record,) = [r for r in caplog.records if "falling back to CPU" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert "CUDA out of memory" in record.getMessage()
+
+    def test_the_device_choice_is_logged_not_printed(
+        self, translator_module, fake_argos, caplog, capsys, monkeypatch
+    ):
+        monkeypatch.delenv("ARGOS_DEVICE_TYPE", raising=False)
+        with caplog.at_level(logging.INFO, logger="langscope.translator"):
+            translator_module.init_translation_backend()
+        assert any("Device: CPU" in r.getMessage() for r in caplog.records)
+        assert capsys.readouterr().out == ""
