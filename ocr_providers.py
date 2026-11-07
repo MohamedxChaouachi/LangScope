@@ -74,14 +74,13 @@ def _detect_gpu() -> bool:
         import torch
 
         ok = torch.cuda.is_available()
-        log.info(
-            f"[OCR] CUDA GPU: {torch.cuda.get_device_name(0)}"
-            if ok
-            else "[OCR] No CUDA GPU — CPU fallback."
-        )
+        if ok:
+            log.info("[OCR] CUDA GPU: %s", torch.cuda.get_device_name(0))
+        else:
+            log.info("[OCR] No CUDA GPU — CPU fallback.")
         return ok
     except Exception as exc:
-        log.warning(f"[OCR] GPU probe failed ({exc}) — CPU.")
+        log.warning("[OCR] GPU probe failed (%s) — CPU.", exc)
         return False
 
 
@@ -315,13 +314,16 @@ class EasyOCRProvider(BaseOCR):
             if key in self._cache:
                 return self._cache[key]
             log.info(
-                f"[OCR] Loading EasyOCR reader langs={langs} gpu={BACKEND.use_gpu} fp16={USE_FP16}…"
+                "[OCR] Loading EasyOCR reader langs=%s gpu=%s fp16=%s…",
+                langs,
+                BACKEND.use_gpu,
+                USE_FP16,
             )
             t0 = time.perf_counter()
             r = easyocr.Reader(list(langs), gpu=BACKEND.use_gpu, verbose=False)
             if USE_FP16:
                 self._apply_fp16(r)
-            log.info(f"[OCR] Reader ready in {(time.perf_counter() - t0) * 1000:.0f} ms.")
+            log.info("[OCR] Reader ready in %.0f ms.", (time.perf_counter() - t0) * 1000)
             self._cache[key] = r
             return r
 
@@ -340,7 +342,7 @@ class EasyOCRProvider(BaseOCR):
                 reader.recognizer = reader.recognizer.half()
             log.info("[OCR] fp16 applied to detector + recognizer.")
         except Exception as exc:
-            log.warning(f"[OCR] fp16 cast failed ({exc}) — staying fp32.")
+            log.warning("[OCR] fp16 cast failed (%s) — staying fp32.", exc)
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
@@ -368,8 +370,12 @@ class EasyOCRProvider(BaseOCR):
             self._cfg.confidence,
         )
         log.debug(
-            f"[OCR] Stats — calls={self._call_count}  dets={self._det_count}  "
-            f"avg={avg:.2f}  min={self._score_min:.2f}  max={self._score_max:.2f}"
+            "[OCR] Stats — calls=%d  dets=%d  avg=%.2f  min=%.2f  max=%.2f",
+            self._call_count,
+            self._det_count,
+            avg,
+            self._score_min,
+            self._score_max,
         )
         # Reset window
         self._score_sum = self._score_min = self._score_max = 0.0

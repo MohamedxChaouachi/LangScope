@@ -183,6 +183,29 @@ class TestOcrBackend:
         init_ocr_backend()
         assert (BACKEND.use_gpu, BACKEND.batch_size) == (False, 1)
 
+    def test_the_probe_result_is_logged_as_info(self, monkeypatch, caplog):
+        with caplog.at_level(logging.INFO, logger="langscope.ocr_providers"):
+            monkeypatch.setitem(sys.modules, "torch", FakeTorch(cuda_available=True))
+            init_ocr_backend()
+            monkeypatch.setitem(sys.modules, "torch", FakeTorch(cuda_available=False))
+            init_ocr_backend()
+        assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+            (logging.INFO, "[OCR] CUDA GPU: Fake GPU"),
+            (logging.INFO, "[OCR] No CUDA GPU — CPU fallback."),
+        ]
+
+    def test_a_failing_probe_is_logged_as_a_warning_with_its_reason(self, monkeypatch, caplog):
+        class BrokenTorch(types.ModuleType):
+            def __getattr__(self, name):
+                raise RuntimeError("the driver is too old")
+
+        monkeypatch.setitem(sys.modules, "torch", BrokenTorch("torch"))
+        with caplog.at_level(logging.INFO, logger="langscope.ocr_providers"):
+            init_ocr_backend()
+        (record,) = caplog.records
+        assert record.levelno == logging.WARNING
+        assert record.getMessage() == "[OCR] GPU probe failed (the driver is too old) — CPU."
+
     def test_init_can_go_back_to_the_cpu(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "torch", FakeTorch(cuda_available=True))
         init_ocr_backend()

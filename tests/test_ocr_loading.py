@@ -6,6 +6,7 @@ EasyOCR's reader takes seconds to build and, for a language it has not seen, dow
 """
 
 import logging
+import re
 import sys
 import threading
 import time
@@ -333,3 +334,87 @@ class TestGpuOutOfMemory:
         with pytest.raises(RuntimeError, match="out of memory"):
             self.provider()._readtext(reader, np.zeros((30, 30), np.uint8))
         assert reader.batch_sizes == [16]
+
+
+class TestOcrLogMessages:
+    LOGGER = "langscope.ocr_providers"
+
+    @pytest.fixture(autouse=True)
+    def cpu_backend(self, monkeypatch):
+        import ocr_providers
+
+        monkeypatch.setattr(ocr_providers.BACKEND, "use_gpu", False)
+
+    def messages(self, caplog, level=logging.INFO):
+        return [r.getMessage() for r in caplog.records if r.levelno >= level]
+
+    def test_loading_a_reader_logs_what_is_loaded_and_how_long_it_took(self, fake_easyocr, caplog):
+        from ocr_providers import EasyOCRProvider
+
+        provider = EasyOCRProvider("fr")
+        with caplog.at_level(logging.INFO, logger=self.LOGGER):
+            provider.load()
+        loading, ready = self.messages(caplog)
+        assert loading == "[OCR] Loading EasyOCR reader langs=['fr', 'en'] gpu=False fp16=False…"
+        assert re.fullmatch(r"\[OCR\] Reader ready in \d+ ms\.", ready)
+
+    def test_the_load_time_is_reported_in_milliseconds(self, fake_easyocr, caplog, monkeypatch):
+        import ocr_providers
+        from ocr_providers import EasyOCRProvider
+
+        ticks = iter([100.0, 102.5])  # the load starts at t=100 s and ends 2.5 s later
+        clock = types.SimpleNamespace(perf_counter=lambda: next(ticks))
+        monkeypatch.setattr(ocr_providers, "time", clock)
+        with caplog.at_level(logging.INFO, logger=self.LOGGER):
+            EasyOCRProvider("en").load()
+        assert "[OCR] Reader ready in 2500 ms." in self.messages(caplog)
+
+    def test_a_cached_reader_logs_nothing(self, fake_easyocr, caplog):
+        from ocr_providers import EasyOCRProvider
+
+        provider = EasyOCRProvider("en")
+        provider.load()
+        with caplog.at_level(logging.INFO, logger=self.LOGGER):
+            provider.load()
+        assert self.messages(caplog) == []
+
+    def test_fp16_is_logged_when_applied_and_when_it_fails(self, caplog):
+        from ocr_providers import EasyOCRProvider
+
+        class Net:
+            def half(self):
+                return self
+
+        good = types.SimpleNamespace(detector=Net(), recognizer=Net())
+
+        class BrokenNet:
+            def half(self):
+                raise RuntimeError("boom")
+
+        bad = types.SimpleNamespace(detector=BrokenNet(), recognizer=None)
+        with caplog.at_level(logging.INFO, logger=self.LOGGER):
+            EasyOCRProvider._apply_fp16(good)
+            EasyOCRProvider._apply_fp16(bad)
+        applied, failed = [r for r in caplog.records]
+        assert applied.levelno == logging.INFO
+        assert applied.getMessage() == "[OCR] fp16 applied to detector + recognizer."
+        assert failed.levelno == logging.WARNING
+        assert failed.getMessage() == "[OCR] fp16 cast failed (boom) — staying fp32."
+
+    def test_confidence_statistics_are_logged_and_the_window_starts_over(self, caplog):
+        from ocr_providers import EasyOCRProvider
+
+        provider = EasyOCRProvider("en")
+        for score in (0.4, 0.8):
+            provider._update_stats(score)
+        provider._call_count = 20
+        with caplog.at_level(logging.DEBUG, logger=self.LOGGER):
+            provider._log_stats()
+            provider._log_stats()  # the window was reset by the first call
+        first, second, empty = self.messages(caplog, logging.DEBUG)
+        assert first == (
+            "[OCR] Confidence stats (last 20 calls): "
+            "detections=2  avg=0.60  min=0.40  max=0.80  threshold=0.35"
+        )
+        assert second == "[OCR] Stats — calls=20  dets=2  avg=0.60  min=0.40  max=0.80"
+        assert empty == "[OCR] Stats: 0 detections in last 20 calls"

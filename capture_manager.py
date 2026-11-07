@@ -66,7 +66,7 @@ class CaptureManager:
         self._thread: threading.Thread | None = None
         self._dxcam = _try_dxcam()
         self._backend: str = "dxcam" if self._dxcam else "mss"
-        log.info(f"[Capture] Backend: {self._backend}")
+        log.info("[Capture] Backend: %s", self._backend)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

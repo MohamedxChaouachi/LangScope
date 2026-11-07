@@ -134,6 +134,12 @@ def count(rec, name):
 
 
 class TestLogging:
+    @pytest.mark.parametrize("with_dxcam, backend", [(True, "dxcam"), (False, "mss")])
+    def test_the_capture_backend_is_logged(self, install, caplog, with_dxcam, backend):
+        with caplog.at_level(logging.INFO, logger="langscope.capture"):
+            install(with_dxcam=with_dxcam)
+        assert f"[Capture] Backend: {backend}" in [r.getMessage() for r in caplog.records]
+
     def test_a_dxcam_init_failure_is_logged_once(self, install, run, rec, caplog):
         manager = install(create_error=RuntimeError("no GPU adapter"))
         with caplog.at_level(logging.DEBUG, logger="langscope.capture"):

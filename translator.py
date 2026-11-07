@@ -243,7 +243,7 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
     if from_code == to_code:
         return text  # nothing to translate
 
-    log.debug(f"[Translator] Translating ({from_code}->{to_code}): {text[:50]!r}")
+    log.debug("[Translator] Translating (%s->%s): %r", from_code, to_code, text[:50])
 
     # ── Argos Translate call ───────────────────────────────────────────────
     t0 = time.perf_counter()
@@ -263,14 +263,16 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
 
         if from_lang is None or to_lang is None:
             log.warning(
-                f"[Translator] ⚠  Language not found — from={from_lang}, to={to_lang}. "
-                f"Available: {[lang.code for lang in unique_langs]}"
+                "[Translator] ⚠  Language not found — from=%s, to=%s. Available: %s",
+                from_lang,
+                to_lang,
+                [lang.code for lang in unique_langs],
             )
             return text
 
         translation = from_lang.get_translation(to_lang)
         if translation is None:
-            log.warning(f"[Translator] ⚠  No translation path for {from_code}->{to_code}")
+            log.warning("[Translator] ⚠  No translation path for %s->%s", from_code, to_code)
             return text
 
         result = translation.translate(text)
@@ -282,12 +284,12 @@ def translate_text(text: str, from_code: str, to_code: str) -> str:
             from_code,
             to_code,
         )
-        log.debug(f"[Translator] OK Result: {result[:50]!r}")
+        log.debug("[Translator] OK Result: %r", result[:50])
 
         return result.strip() if result and result.strip() else text
 
     except Exception as exc:
-        log.error(f"[Translator] ERR Exception ({from_code}->{to_code}): {exc}")
+        log.error("[Translator] ERR Exception (%s->%s): %s", from_code, to_code, exc)
         return text
 
 
