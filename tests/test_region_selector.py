@@ -51,8 +51,8 @@ class TestPickingARegion:
     def test_a_drag_emits_the_region_in_native_pixels(self, window, signals):
         picked, cancelled = signals
         drag(window, (100, 50), (300, 200))
-        # (top, left, width, height). A drag from pixel 100 to pixel 300 includes both.
-        assert picked == [(50, 100, 201, 151)]
+        # (top, left, width, height); the drag points are the region edges.
+        assert picked == [(50, 100, 200, 150)]
         assert cancelled == []
 
     @pytest.mark.parametrize(
@@ -67,26 +67,26 @@ class TestPickingARegion:
     def test_a_drag_picks_the_same_region_in_every_direction(self, window, signals, start, end):
         picked, _ = signals
         drag(window, start, end)
-        assert picked == [(50, 100, 201, 151)]
+        assert picked == [(50, 100, 200, 150)]
 
-    def test_a_drag_includes_the_pixels_under_both_corners(self, window, signals):
+    def test_a_drag_uses_the_distance_between_both_corners(self, window, signals):
         picked, _ = signals
-        drag(window, (10, 10), (19, 19))  # from pixel 10 to pixel 19: ten pixels each way
+        drag(window, (10, 10), (19, 19))
         drag(window, (19, 19), (10, 10))
-        assert picked == [(10, 10, 10, 10), (10, 10, 10, 10)]
+        assert picked == [(10, 10, 9, 9), (10, 10, 9, 9)]
 
     def test_a_drag_that_starts_at_the_top_left_pixel_of_the_screen_counts(self, window, signals):
         # A QPoint at (0, 0) is falsy, so truthiness checks on the drag origin lose this drag.
         picked, cancelled = signals
         drag(window, (0, 0), (120, 80))
-        assert picked == [(0, 0, 121, 81)]
+        assert picked == [(0, 0, 120, 80)]
         assert cancelled == []
 
     def test_a_drag_from_the_top_edge_and_from_the_left_edge_count(self, window, signals):
         picked, _ = signals
         drag(window, (0, 40), (100, 100))
         drag(window, (40, 0), (100, 100))
-        assert picked == [(40, 0, 101, 61), (0, 40, 61, 101)]
+        assert picked == [(40, 0, 100, 60), (0, 40, 60, 100)]
 
     def test_the_selection_is_cleared_once_the_region_is_picked(self, window, signals):
         picked, _ = signals
@@ -101,9 +101,9 @@ class TestOnAScaledScreen:
         window._screen = FakeScreen(1000, 500, 960, 540, 2.0)
         picked, _ = signals
         drag(window, (100, 50), (300, 200))
-        # The 201 x 151 logical pixels picked at (100, 50) are 402 x 302 physical pixels at
+        # The 200 x 150 logical pixels picked at (100, 50) are 400 x 300 physical pixels at
         # 1000 + 200 and 500 + 100.
-        assert picked == [(600, 1200, 402, 302)]
+        assert picked == [(600, 1200, 400, 300)]
 
 
 class TestCancelling:
@@ -116,7 +116,7 @@ class TestCancelling:
 
     def test_a_drag_just_over_5_pixels_in_both_directions_picks(self, window, signals):
         picked, _ = signals
-        drag(window, (100, 50), (105, 55))  # 6 x 6 pixels with both ends included
+        drag(window, (100, 50), (106, 56))
         assert picked == [(50, 100, 6, 6)]
 
     def test_a_right_click_cancels(self, window, signals):

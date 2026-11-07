@@ -22,7 +22,7 @@ from collections.abc import Sequence
 
 import numpy as np
 import qtawesome as qta
-from PyQt6.QtCore import QObject, QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QCursor,
@@ -217,7 +217,7 @@ class _ScreenSelectorWindow(QWidget):
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
             p.setPen(QPen(QColor(COLOR_ACCENT), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(r)
+            p.drawRect(QRectF(r.left(), r.top(), r.width(), r.height()))
             p.setPen(QColor("#FFFFFF"))
             p.setFont(QFont(_UI_FONT, 10))
             d = self._screen.devicePixelRatio()
@@ -236,17 +236,14 @@ class _ScreenSelectorWindow(QWidget):
             )
 
     def _rect(self) -> QRect:
-        """The dragged rectangle, including the pixels under both corners, whichever way the
-        mouse moved. Only called once a drag has started.
-
-        QRect(a, b).normalized() would leave out the far corner whenever the second point is
-        above or to the left of the first, so a drag toward the top-left selected a region one
-        pixel smaller on each side than the same drag made the other way round."""
+        """The dragged rectangle, with the mouse positions as its edges."""
         assert self._origin is not None and self._current is not None
         a, b = self._origin, self._current
         return QRect(
-            QPoint(min(a.x(), b.x()), min(a.y(), b.y())),
-            QPoint(max(a.x(), b.x()), max(a.y(), b.y())),
+            min(a.x(), b.x()),
+            min(a.y(), b.y()),
+            abs(a.x() - b.x()),
+            abs(a.y() - b.y()),
         )
 
 
