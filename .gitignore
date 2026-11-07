@@ -16,17 +16,11 @@ env/
 ENV/
 
 # ── ML model caches (can be hundreds of MB — re-downloaded on first run) ──────
-# EasyOCR models (~200 MB each)
+# EasyOCR keeps its models in ~/.EasyOCR, outside the repository. This entry only covers a
+# copy that ends up in the working directory (for example when EasyOCR is run from here).
+# Argos Translate packages and the PyTorch hub cache also live in the home directory, where a
+# .gitignore cannot reach them, so there is nothing to list for them.
 .EasyOCR/
-
-# Argos Translate packages (~100 MB each) — stored in ~/.local/share/argos-translate
-# Not in project dir but listed here for clarity
-
-# PaddleOCR / PaddlePaddle cache
-~/.paddlex/
-
-# PyTorch hub cache
-~/.cache/torch/
 
 # ── IDE / OS ──────────────────────────────────────────────────────────────────
 .vscode/
