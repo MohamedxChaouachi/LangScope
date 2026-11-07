@@ -18,6 +18,7 @@ from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
+import ocr_providers
 import translator
 from capture_manager import CaptureManager
 from ocr_worker import OCRWorker
@@ -59,6 +60,12 @@ if __name__ == "__main__":
         level=_loglevel,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    # ── Backends ──────────────────────────────────────────────────────────────
+    # Probe the GPU and set up Argos once, here, after logging is configured so that what they
+    # report is shown. Importing the modules does neither.
+    ocr_providers.init_ocr_backend()
+    translator.init_translation_backend()
 
     app = QApplication(sys.argv)
 

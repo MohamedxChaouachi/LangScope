@@ -85,7 +85,34 @@ def _detect_gpu() -> bool:
         return False
 
 
-_USE_GPU: bool = _detect_gpu()
+@dataclass
+class OcrBackend:
+    """What the OCR engine runs on. init_ocr_backend() fills it in at startup.
+
+    Until then it describes the CPU, which works everywhere.
+
+    use_gpu     — run EasyOCR on the CUDA GPU.
+    batch_size  — EasyOCR recognises text boxes in batches. Its default (1) feeds the GPU one
+                  box at a time; 16 is ~1.5-2x faster on a screen full of text at the cost of
+                  a little VRAM. It stays 1 on the CPU, where batching doesn't help.
+    """
+
+    use_gpu: bool = False
+    batch_size: int = 1
+
+
+BACKEND = OcrBackend()
+
+
+def init_ocr_backend() -> OcrBackend:
+    """Probe for a CUDA GPU and set BACKEND accordingly.
+
+    Call once at startup, before creating an EasyOCRProvider. Importing this module does not
+    touch torch or the GPU."""
+    BACKEND.use_gpu = _detect_gpu()
+    BACKEND.batch_size = 16 if BACKEND.use_gpu else 1
+    return BACKEND
+
 
 # GPU half-precision (fp16) — EXPERIMENTAL, opt-in only.
 # EasyOCR doesn't officially support this; we cast the underlying torch
@@ -95,11 +122,6 @@ _USE_GPU: bool = _detect_gpu()
 # single readtext() call succeeds on your GPU. Default OFF so the app
 # keeps working out of the box.
 USE_FP16: bool = False
-
-# EasyOCR recognises text boxes in batches. Its default (1) feeds the GPU one
-# box at a time; 16 is ~1.5-2x faster on a screen full of text at the cost of a
-# little VRAM. Left at the default on CPU, where batching doesn't help.
-_OCR_BATCH_SIZE: int = 16 if _USE_GPU else 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,7 +227,7 @@ class EasyOCRProvider(BaseOCR):
         self._lock = threading.Lock()
         self._langs = EASYOCR_LANG_MAP.get(from_code, ["en"])
         self._cfg = preprocess_cfg or PreprocessConfig()
-        self._batch_size = _OCR_BATCH_SIZE
+        self._batch_size = BACKEND.batch_size
         # No reader is built here: that takes seconds and may download ~200 MB. It happens in
         # load(), or on the first read(), on whichever thread calls them.
 
@@ -271,7 +293,7 @@ class EasyOCRProvider(BaseOCR):
                 return reader.readtext(img, detail=1, batch_size=self._batch_size)
             except Exception as exc:
                 oom = "out of memory" in str(exc).lower()
-                if not (oom and _USE_GPU and self._batch_size > 1):
+                if not (oom and BACKEND.use_gpu and self._batch_size > 1):
                     raise
                 import torch
 
@@ -290,9 +312,11 @@ class EasyOCRProvider(BaseOCR):
         with self._lock:
             if key in self._cache:
                 return self._cache[key]
-            log.info(f"[OCR] Loading EasyOCR reader langs={langs} gpu={_USE_GPU} fp16={USE_FP16}…")
+            log.info(
+                f"[OCR] Loading EasyOCR reader langs={langs} gpu={BACKEND.use_gpu} fp16={USE_FP16}…"
+            )
             t0 = time.perf_counter()
-            r = easyocr.Reader(list(langs), gpu=_USE_GPU, verbose=False)
+            r = easyocr.Reader(list(langs), gpu=BACKEND.use_gpu, verbose=False)
             if USE_FP16:
                 self._apply_fp16(r)
             log.info(f"[OCR] Reader ready in {(time.perf_counter() - t0) * 1000:.0f} ms.")

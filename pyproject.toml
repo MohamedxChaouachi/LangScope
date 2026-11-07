@@ -31,9 +31,3 @@ ignore = [
     # PyQt6 instead of degrading gracefully.
     "B905",
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# translator.py pins argostranslate's data directory and chooses the inference device before it
-# imports the remaining argostranslate submodules and ctranslate2, so those imports must come
-# after executable code.
-"translator.py" = ["E402"]

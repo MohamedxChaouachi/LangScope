@@ -74,6 +74,7 @@ def run(args: argparse.Namespace) -> None:
         ocrp.USE_FP16 = True
         print("fp16: ENABLED (experimental — will fall back to fp32 on failure)")
 
+    ocrp.init_ocr_backend()
     provider = ocrp.EasyOCRProvider(from_code=args.lang)
 
     # Warm-up call — model loading + first CUDA kernel compilation happens
@@ -97,7 +98,7 @@ def run(args: argparse.Namespace) -> None:
     print()
     print(
         f"=== Results ({len(frames)} frames, lang={args.lang}, "
-        f"gpu={ocrp._USE_GPU}, fp16={ocrp.USE_FP16}) ==="
+        f"gpu={ocrp.BACKEND.use_gpu}, fp16={ocrp.USE_FP16}) ==="
     )
     summarize("preprocess", prep_samples)
     summarize("inference (readtext)", inf_samples)

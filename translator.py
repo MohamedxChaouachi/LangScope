@@ -2,12 +2,14 @@
 translator.py — Offline Translation via Argos Translate
 Fully local inference — no internet required after first-time package install.
 
+Call init_translation_backend() once at startup, before translating or installing packs.
+Importing this module changes nothing: no directory is created and no setting is touched.
+
 Package cache:
   Argos Translate uses a platform-specific data directory.  On Windows this
   ends up as C:\\Users\\<user>\\.local\\share\\argos-translate\\ (XDG-style),
-  NOT under %%LOCALAPPDATA%%.  We pin the path explicitly at import time so
-  that get_installed_packages() reliably finds already-downloaded models and
-  never triggers a spurious re-download.
+  NOT under %%LOCALAPPDATA%%.  init_translation_backend() makes sure the packages directory
+  exists and sets data_dir to a Path and package_data_dir to a str under it.
 
 Caching is not done here: TranslationWorker keeps the one (bounded) translation cache, above
 the BaseTranslator interface, so every engine benefits and nothing is cached twice.
@@ -22,25 +24,36 @@ import re
 import threading
 import time
 
-log = logging.getLogger("langscope.translator")
+# pyrefly: ignore [missing-import]
+import argostranslate.package
 
-# ── Pin argostranslate's data directory BEFORE importing submodules ────────────
-# Without this, get_installed_packages() may return [] even when packages exist
-# because argostranslate.settings resolves the path lazily and inconsistently
-# across import order on Windows.
 # pyrefly: ignore [missing-import]
 import argostranslate.settings as _argo_settings
 
-_DATA_DIR = pathlib.Path(_argo_settings.data_dir)  # e.g. ~/.local/share/argos-translate
-_PACKAGES_DIR = _DATA_DIR / "packages"
-_PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
+# pyrefly: ignore [missing-import]
+import argostranslate.translate
 
-# Keep data_dir as a Path — argostranslate internals use the / operator on it
-# (e.g. sbd.py: settings.data_dir / "minisbd").  Only package_data_dir is str.
-_argo_settings.data_dir = _DATA_DIR
-_argo_settings.package_data_dir = str(_PACKAGES_DIR)
+# pyrefly: ignore [missing-import]
+import ctranslate2
 
-log.info(f"[Translator] Package cache: {_PACKAGES_DIR}")
+log = logging.getLogger("langscope.translator")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Start-up configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _pin_data_directories() -> None:
+    """Create Argos' packages directory and give the two settings the types its code expects.
+
+    data_dir stays a Path: Argos uses the / operator on it (for example sbd.py builds
+    settings.data_dir / "minisbd"). Only package_data_dir is a str."""
+    data_dir = pathlib.Path(_argo_settings.data_dir)  # e.g. ~/.local/share/argos-translate
+    packages_dir = data_dir / "packages"
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    _argo_settings.data_dir = data_dir
+    _argo_settings.package_data_dir = str(packages_dir)
+    log.info("[Translator] Package cache: %s", packages_dir)
 
 
 def _configure_inference_device() -> None:
@@ -56,8 +69,6 @@ def _configure_inference_device() -> None:
         print(f"[Translator] Device (from env): {_argo_settings.device}")
         return
     try:
-        import ctranslate2
-
         if ctranslate2.get_cuda_device_count() > 0:
             _argo_settings.device = "cuda"
             if not os.environ.get("ARGOS_COMPUTE_TYPE"):
@@ -70,16 +81,13 @@ def _configure_inference_device() -> None:
     print("[Translator] Device: CPU")
 
 
-_configure_inference_device()
+def init_translation_backend() -> None:
+    """Set up Argos for this process: its data directories and the inference device.
 
-# pyrefly: ignore [missing-import]
-import argostranslate.package
+    Call once at startup, before translating or installing language packs."""
+    _pin_data_directories()
+    _configure_inference_device()
 
-# pyrefly: ignore [missing-import]
-import argostranslate.translate
-
-# pyrefly: ignore [missing-import]
-import ctranslate2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Installed language packs
