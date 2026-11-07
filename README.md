@@ -55,13 +55,13 @@ Render timer (60 FPS)  →  live feed panel  and/or  desktop overlay
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11 or newer
 - Windows (tested on Windows 10/11)
 - An NVIDIA GPU is optional but recommended
 
 ### Installation
 
-Install PyTorch first. The right build depends on your hardware, so it is not listed in `requirements.txt`.
+Install PyTorch first. The right build depends on your hardware, so it is not one of LangScope's dependencies.
 
 ```bash
 # CPU only
@@ -74,16 +74,30 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
 
-See [pytorch.org](https://pytorch.org/get-started/locally/) for other CUDA versions. Then install the rest:
+See [pytorch.org](https://pytorch.org/get-started/locally/) for other CUDA versions.
+
+**Newer Python versions.** PyTorch does not publish every CUDA build for every Python version. When this was checked, the CUDA 12.1 build above had no wheels for Python 3.13 or 3.14, and the CUDA 11.8 build had none for 3.14. On those versions, use the CPU build or a newer CUDA build such as `cu126`, `cu128` or `cu130`, for example:
 
 ```bash
-pip install -r requirements.txt
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
 
-Optional, for lower-latency capture on Windows:
+Then install LangScope itself:
 
 ```bash
-pip install dxcam
+pip install .
+```
+
+To work on it, install it in editable mode together with the test and lint tools:
+
+```bash
+pip install -e ".[dev]"
+```
+
+Optional, for lower-latency capture on Windows (extras can be combined, as in `".[dev,dxcam]"`):
+
+```bash
+pip install ".[dxcam]"
 ```
 
 ---
@@ -91,8 +105,10 @@ pip install dxcam
 ## Usage
 
 ```bash
-python main.py
+langscope
 ```
+
+`python -m langscope` does the same. The `langscope` command is installed into the Python environment you installed LangScope in, so activate that environment first, or call it by path (for example `.venv\Scripts\langscope`).
 
 1. Choose the source (**FROM**) and target (**TO**) languages. If the language pack is not cached yet, it downloads automatically and the badge next to the dropdown shows progress.
 2. Click **Select Region** and drag over the area to translate. A selector opens on each monitor. Press `Esc` or right-click to cancel.
@@ -108,15 +124,17 @@ Changing the language pair while running clears tracked regions and caches, then
 |---|---|---|
 | Log level | `LANGSCOPE_LOGLEVEL` environment variable (`DEBUG`, `INFO`, `WARNING`, ...) | `INFO` |
 | Translation device | `ARGOS_DEVICE_TYPE` / `ARGOS_COMPUTE_TYPE` environment variables | CUDA if available, else CPU |
-| OCR rate | `OCR_FPS` in `ocr_worker.py` | 8 |
-| Change-detection sensitivity | `PIXEL_DELTA`, `MIN_CHANGED_PX` in `ocr_worker.py` | 40, 12 |
-| OCR preprocessing and confidence | `PreprocessConfig` in `ocr_providers.py` | upscale 1.5x, grayscale, CLAHE, sharpen, confidence 0.35 |
-| Region tracking and smoothing | constants at the top of `translation_worker.py` (`IOU_THRESHOLD`, `TEXT_SIM_THRESHOLD`, `EMA_ALPHA`, `MAX_MISSES`, `REGION_TTL`) | see file |
+| OCR rate | `OCR_FPS` in `src/langscope/ocr_worker.py` | 8 |
+| Change-detection sensitivity | `PIXEL_DELTA`, `MIN_CHANGED_PX` in `src/langscope/ocr_worker.py` | 40, 12 |
+| OCR preprocessing and confidence | `PreprocessConfig` in `src/langscope/ocr_providers.py` | upscale 1.5x, grayscale, CLAHE, sharpen, confidence 0.35 |
+| Region tracking and smoothing | constants at the top of `src/langscope/translation_worker.py` (`IOU_THRESHOLD`, `TEXT_SIM_THRESHOLD`, `EMA_ALPHA`, `MAX_MISSES`, `REGION_TTL`) | see file |
+
+An unknown value for `LANGSCOPE_LOGLEVEL` means `INFO`.
 
 Example, for verbose logs:
 
 ```powershell
-$env:LANGSCOPE_LOGLEVEL = "DEBUG"; python main.py
+$env:LANGSCOPE_LOGLEVEL = "DEBUG"; langscope
 ```
 
 ---
@@ -125,27 +143,33 @@ $env:LANGSCOPE_LOGLEVEL = "DEBUG"; python main.py
 
 ```
 LangScope/
-├── main.py                  # Entry point: wires the workers, render timer and UI together
-├── capture_manager.py       # 60 FPS screen capture thread (DXCam, MSS fallback)
-├── ocr_worker.py            # OCR thread with frame-hash and pixel-change gating
-├── ocr_providers.py         # BaseOCR interface, EasyOCR provider, preprocessing pipeline
-├── translation_worker.py    # Region tracking, bbox smoothing, filtering, batched translation
-├── translation_providers.py # BaseTranslator interface and Argos wrapper
-├── translator.py            # Argos Translate setup, GPU config, cache, batched translation
-├── models.py                # RawSegment and TranslationRegion data classes
-├── ui.py                    # Control panel, live feed widget, multi-monitor region selector
-├── overlay_window.py        # Click-through desktop overlay
-├── render_utils.py          # Shared text-drawing code for the live feed and overlay
-├── screen_utils.py          # Native/logical pixel conversion for multi-monitor and HiDPI
-├── theme.py                 # UI colors, fonts and spacing
-├── bench_ocr.py             # OCR benchmark harness
-├── assets/                  # App icon and UI images
-├── tests/                   # pytest suite
-├── .github/workflows/       # CI: ruff and pytest on every push and pull request
-├── pyproject.toml           # ruff and pytest configuration
-├── requirements.txt         # runtime dependencies
-├── requirements-dev.txt     # test and lint tooling
-└── requirements-ci.txt      # lightweight set used by CI (no torch, easyocr or argostranslate)
+├── src/langscope/
+│   ├── main.py                  # Entry point: reads the config, sets up logging and the backends, runs the app
+│   ├── __main__.py              # `python -m langscope`
+│   ├── controller.py            # AppController: wires the panel to the pipeline and owns its lifecycle
+│   ├── config.py                # The log level, from LANGSCOPE_LOGLEVEL
+│   ├── capture_manager.py       # 60 FPS screen capture thread (DXCam, MSS fallback)
+│   ├── ocr_worker.py            # OCR thread; FrameChangeGate decides whether a frame is worth OCR
+│   ├── ocr_providers.py         # BaseOCR interface, EasyOCR provider, preprocessing pipeline
+│   ├── translation_worker.py    # Region tracking, bbox smoothing, filtering, batched translation
+│   ├── translation_providers.py # BaseTranslator and LanguagePacks interfaces, with Argos implementations
+│   ├── translator.py            # Argos Translate setup, device configuration, language packs, batched translation
+│   ├── models.py                # RawSegment, TranslationRegion, RegionSnapshot, and the BBox and Region types
+│   ├── render_gate.py           # Decides what the 60 FPS render timer needs to redraw
+│   ├── ui.py                    # Control panel, live feed widget, multi-monitor region selector
+│   ├── overlay_window.py        # Click-through desktop overlay
+│   ├── render_utils.py          # Shared text-drawing code for the live feed and overlay
+│   ├── screen_utils.py          # Native/logical pixel conversion for multi-monitor and HiDPI
+│   ├── theme.py                 # UI colors, fonts and spacing
+│   └── assets/                  # App icon and UI images (shipped as package data)
+├── scripts/
+│   ├── bench_ocr.py             # OCR benchmark harness
+│   └── check_wheel.py           # Checks that a built wheel has its assets and entry point (used by CI)
+├── tests/                       # pytest suite
+├── .github/workflows/           # CI: ruff, wheel build and check, pytest, pyright
+├── pyproject.toml               # Packaging metadata, dependencies and tool configuration
+├── requirements-ci.txt          # The lightweight set CI installs (no torch, easyocr or argostranslate)
+└── LICENSE                      # MIT
 ```
 
 `BaseOCR` and `BaseTranslator` are the extension points: add a new engine by implementing the interface, without touching the rest of the pipeline.
@@ -165,7 +189,7 @@ LangScope/
 | numpy | Frame processing |
 | dxcam (optional) | Faster capture on the primary monitor |
 
-OpenCV (`cv2`) is used for preprocessing and is installed as a dependency of EasyOCR.
+OpenCV (`opencv-python-headless`, imported as `cv2`) is used for preprocessing. The `argostranslate` range is bounded on both sides (`>=1.10.0,<1.12`) because `translator.py` reads some of Argos' internals to translate in batches; `tests/test_argos_contract.py` checks them.
 
 ---
 
@@ -173,7 +197,7 @@ OpenCV (`cv2`) is used for preprocessing and is installed as a dependency of Eas
 
 ```bash
 # Full environment (after installing PyTorch as described above)
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -e ".[dev]"
 
 # Or the lightweight set CI uses, without torch, easyocr or argostranslate
 pip install -r requirements-ci.txt
@@ -184,9 +208,11 @@ pyright
 pytest
 ```
 
-The tests cover bounding-box IoU, text similarity, text filters, bbox smoothing and the region data model. Smoke tests import every module and build and paint the Qt widgets offscreen, so they need no display. Tests that need argostranslate skip themselves, with a reason, when it is not installed; `pytest` lists each skip.
+The tests cover region tracking and pruning, change detection, batched translation (including pivoting through English), the coordinate conversions, the region selector, the controller's wiring, the start-up configuration and the packaging metadata. Smoke tests import every module and build and paint the Qt widgets offscreen, so they need no display. Tests that need argostranslate skip themselves, with a reason, when it is not installed; `pytest` lists each skip.
 
-CI runs `ruff` and `pytest` on every push and pull request (`.github/workflows/ci.yml`).
+The tests import the package from `src/` (pytest's `pythonpath` setting), so they run in a fresh clone without installing LangScope.
+
+CI runs `ruff`, builds the wheel and checks its contents, then runs `pytest` and `pyright` on Windows with Python 3.11 and 3.14 (`.github/workflows/ci.yml`).
 
 ---
 
@@ -197,11 +223,11 @@ OCR inference (EasyOCR's CRAFT detector and CRNN recognizer) is the dominant cos
 To measure your own machine and capture region:
 
 ```bash
-python bench_ocr.py --frames 30
-python bench_ocr.py --frames 40 --lang fr --top 100 --left 100 --width 600 --height 300
+python scripts/bench_ocr.py --frames 30
+python scripts/bench_ocr.py --frames 40 --lang fr --top 100 --left 100 --width 600 --height 300
 ```
 
-It reports preprocess and inference time, mean, median and p95 latency, and the sustained FPS your hardware can deliver. Use it before tuning `OCR_FPS` in `ocr_worker.py` or `PreprocessConfig` in `ocr_providers.py`. A smaller capture region is the most effective way to cut OCR time.
+It reports preprocess and inference time, mean, median and p95 latency, and the sustained FPS your hardware can deliver. Use it before tuning `OCR_FPS` in `src/langscope/ocr_worker.py` or `PreprocessConfig` in `src/langscope/ocr_providers.py`. A smaller capture region is the most effective way to cut OCR time.
 
 ---
 
