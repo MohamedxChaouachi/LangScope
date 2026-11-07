@@ -1,3 +1,5 @@
+![LangScope demo](docs/demo.gif)
+
 # LangScope
 
 [![CI](https://github.com/MohamedxChaouachi/LangScope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/MohamedxChaouachi/LangScope/actions/workflows/ci.yml)
@@ -193,41 +195,81 @@ OpenCV (`opencv-python-headless`, imported as `cv2`) is used for preprocessing. 
 
 ---
 
-## Testing
+## Development
 
-```bash
-# Full environment (after installing PyTorch as described above)
+Create and activate a virtual environment, then install the development extra. Install the CPU or CUDA PyTorch build first as described in [Installation](#installation), because PyTorch uses a custom package index.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-
-# Or the lightweight set CI uses, without torch, easyocr or argostranslate
-pip install -r requirements-ci.txt
-
-ruff check .
-ruff format --check .
-pyright
-pytest
 ```
 
-The tests cover region tracking and pruning, change detection, batched translation (including pivoting through English), the coordinate conversions, the region selector, the controller's wiring, the start-up configuration and the packaging metadata. Smoke tests import every module and build and paint the Qt widgets offscreen, so they need no display. Tests that need argostranslate skip themselves, with a reason, when it is not installed; `pytest` lists each skip.
+Run the checks from the activated environment:
 
-The tests import the package from `src/` (pytest's `pythonpath` setting), so they run in a fresh clone without installing LangScope.
+```powershell
+ruff check .
+ruff format --check .
+pytest
+pyright
+```
 
-CI runs `ruff`, builds the wheel and checks its contents, then runs `pytest` and `pyright` on Windows with Python 3.11 and 3.14 (`.github/workflows/ci.yml`).
+For the lightweight test-only environment used by CI, install `requirements-ci.txt` instead; it omits PyTorch, EasyOCR and Argos Translate. Tests that require Argos skip with a reason when it is not installed.
+
+The tests cover region tracking, change detection, batched translation (including pivoting through English), coordinate conversions, the region selector, controller wiring, startup configuration and packaging. Smoke tests import every module and build and paint the Qt widgets offscreen, so no display is needed.
+
+CI runs Ruff, builds and checks the wheel, then runs pytest and Pyright on Windows with Python 3.11 and 3.14 ([workflow](.github/workflows/ci.yml)).
 
 ---
 
-## Performance
+## Benchmark
 
 OCR inference (EasyOCR's CRAFT detector and CRNN recognizer) is the dominant cost per frame, not the threading pipeline. On GPU, recognition runs in batches of 16 boxes and halves the batch size automatically if the card runs out of VRAM. The debug stats strip shows the live preprocess/inference split.
 
-To measure your own machine and capture region:
+Fill in this table with the output from the commands below. Use the same screen region for each run; the first model load and warm-up are excluded from the timing samples.
 
-```bash
-python scripts/bench_ocr.py --frames 30
-python scripts/bench_ocr.py --frames 40 --lang fr --top 100 --left 100 --width 600 --height 300
+| Device | Language | Region | Preprocess mean / median / p95 (ms) | Inference mean / median / p95 (ms) | Total mean / median / p95 (ms) | Sustained FPS |
+|---|---|---|---:|---:|---:|---:|
+| CPU | en | 600 x 300 | — / — / — | — / — / — | — / — / — | — |
+| CUDA, FP32 | en | 600 x 300 | — / — / — | — / — / — | — / — / — | — |
+| CUDA, FP16 (experimental) | en | 600 x 300 | — / — / — | — / — / — | — / — / — | — |
+
+Run these commands in PowerShell from the repository root with the project environment active. The selected rectangle must fit on a connected monitor.
+
+```powershell
+# CPU: hide CUDA from PyTorch for this process.
+$env:CUDA_VISIBLE_DEVICES = ""; .\.venv\Scripts\python.exe scripts\bench_ocr.py --frames 40 --lang en --top 100 --left 100 --width 600 --height 300
+
+# CUDA FP32: remove the override so PyTorch can select the GPU.
+Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe scripts\bench_ocr.py --frames 40 --lang en --top 100 --left 100 --width 600 --height 300
+
+# CUDA FP16: experimental; use only after the FP32 run succeeds.
+Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe scripts\bench_ocr.py --frames 40 --lang en --top 100 --left 100 --width 600 --height 300 --fp16
 ```
 
-It reports preprocess and inference time, mean, median and p95 latency, and the sustained FPS your hardware can deliver. Use it before tuning `OCR_FPS` in `src/langscope/ocr_worker.py` or `PreprocessConfig` in `src/langscope/ocr_providers.py`. A smaller capture region is the most effective way to cut OCR time.
+The harness reports preprocess, inference and total mean/median/p95 latency, plus effective maximum sustained FPS. FP16 is opt-in and may fail with a dtype mismatch in EasyOCR; the benchmark does not change the app's default, which remains FP32.
+
+---
+
+## Design decisions & trade-offs
+
+- **Polling instead of per-frame signals.** Capture and translation workers replace their latest-frame and immutable-region snapshots. The 60 FPS render timer polls those references and redraws only when either changes. This avoids queuing high-rate signals and copying or repainting identical frames, at the cost of intentionally skipping intermediate states when workers run faster than rendering.
+- **Pixel-count change detection.** The OCR gate compares every other pixel in each dimension and counts sampled pixels whose largest channel difference exceeds 40. At least 12 sampled pixels must change. This ignores small compression changes and blinking cursors, while a changed text line affects enough pixels to trigger OCR. Tiny or low-contrast changes can be missed.
+- **IoU plus text similarity.** Region matching requires IoU of at least 0.30 and scores candidates with 60% overlap and 40% text similarity; the combined score must reach the configured threshold. Position alone can merge neighboring lines, while text alone can confuse repeated words, so both contribute to identity tracking.
+- **EMA box smoothing.** Bounding boxes use an exponential moving average with `EMA_ALPHA = 0.35`. This reduces jitter between OCR passes but makes the overlay follow rapid movement with a little lag.
+- **Batched CTranslate2 translation.** Sentences from multiple lines are grouped into model batches, preserving alignment and reducing per-call overhead. Argos pivot pairs can require two batched hops. The implementation reads Argos internals for this path, so the dependency is version-bounded and covered by a contract test.
+- **EasyOCR and Argos.** Both keep recognition and translation local after their models and language packs are downloaded. EasyOCR covers the supported scripts through pretrained models; Argos supplies offline language packs and CTranslate2 inference. The trade-offs are a substantial PyTorch install, model-download/storage requirements, CPU latency, and the need to monitor Argos internals as it evolves.
+
+---
+
+## Known limitations
+
+- Windows is the supported and tested desktop platform. Capture behavior on other operating systems is not verified.
+- OCR is gated by pixel changes, so very small changes can wait until enough pixels differ. The OCR worker is capped at 8 passes per second, and CPU-only inference can be slow; smaller capture regions help.
+- Regions are selected on one monitor at a time; a capture region cannot span monitors. Secondary-monitor capture uses MSS rather than DXCam.
+- EasyOCR and Argos models/packs download on first use and require local disk space. Argos language packs are commonly around 100 MB each; OCR models can be around 200 MB for Latin-script languages.
+- **Region pruning is incomplete while OCR batches keep arriving.** `_prune()` currently runs only when the worker mailbox is idle. If batches arrive continuously, regions missed beyond `MAX_MISSES` can remain tracked and the tracking work can grow. The strict expected-failure test is `test_dead_regions_are_removed_while_batches_keep_arriving` in `tests/test_translation_tracking.py`.
+- FP16 OCR is experimental and disabled by default; EasyOCR may encounter a dtype mismatch on some configurations.
 
 ---
 
