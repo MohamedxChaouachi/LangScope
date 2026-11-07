@@ -20,7 +20,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QPaintEvent
 from PyQt6.QtWidgets import QWidget
 
-from models import RegionSnapshot
+from models import Region, RegionSnapshot
 from render_utils import draw_translated_text
 from screen_utils import native_region_to_logical
 
@@ -33,7 +33,7 @@ class OverlayWindow(QWidget):
     in-place on the real desktop rather than inside the control panel.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
             parent,
             Qt.WindowType.FramelessWindowHint
@@ -62,7 +62,7 @@ class OverlayWindow(QWidget):
     def update_regions(
         self,
         regions: Sequence[RegionSnapshot],
-        capture_rect: dict,  # {"top", "left", "width", "height"}
+        capture_rect: Region,
     ) -> None:
         """Reposition window over capture region and update displayed regions."""
         if not self._active:

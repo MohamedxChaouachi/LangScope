@@ -14,13 +14,14 @@ import logging
 import os
 import sys
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 import ocr_providers
 import translator
 from capture_manager import CaptureManager
+from models import Region
 from ocr_worker import OCRWorker
 from overlay_window import OverlayWindow
 from render_gate import RenderGate
@@ -35,7 +36,7 @@ from ui import APP_ICON_PATH, ControlPanel
 class PackageSetupThread(QThread):
     setup_finished = pyqtSignal(str, str, bool)
 
-    def __init__(self, from_code: str, to_code: str, parent=None):
+    def __init__(self, from_code: str, to_code: str, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._from_code = from_code
         self._to_code = to_code
@@ -90,7 +91,7 @@ if __name__ == "__main__":
     ocr_worker.status_changed.connect(panel.set_status)
 
     # ── Render timer (60 FPS) ─────────────────────────────────────────────────
-    _capture_region: dict = {"top": 100, "left": 100, "width": 500, "height": 200}
+    _capture_region: Region = {"top": 100, "left": 100, "width": 500, "height": 200}
     render_gate = RenderGate()
 
     def _render_tick() -> None:

@@ -22,6 +22,8 @@ from __future__ import annotations
 from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QGuiApplication, QScreen
 
+from models import Region
+
 
 def screen_native_rect(screen: QScreen) -> QRect:
     """Bounding rectangle of `screen` in native (physical) desktop pixels."""
@@ -60,10 +62,10 @@ def local_rect_to_native(screen: QScreen, rect: QRect) -> tuple[int, int, int, i
     return top, left, width, height
 
 
-def native_region_to_logical(region: dict) -> tuple[QRect, float, QScreen | None]:
+def native_region_to_logical(region: Region) -> tuple[QRect, float, QScreen | None]:
     """
-    Convert a native-pixel region dict ({"top","left","width","height"}) to a
-    logical QRect suitable for QWidget.setGeometry().
+    Convert a native-pixel Region to a logical QRect suitable for
+    QWidget.setGeometry().
 
     Returns (logical_rect, device_pixel_ratio, screen).
     """

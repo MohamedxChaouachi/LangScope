@@ -14,7 +14,7 @@ import threading
 import time
 
 import numpy as np
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from capture_manager import CaptureManager
 from ocr_providers import BaseOCR, EasyOCRProvider
@@ -104,7 +104,9 @@ class OCRWorker(QThread):
     raw_segments_ready = pyqtSignal(object)
     status_changed = pyqtSignal(str)
 
-    def __init__(self, capture: CaptureManager, ocr: BaseOCR | None = None, parent=None):
+    def __init__(
+        self, capture: CaptureManager, ocr: BaseOCR | None = None, parent: QObject | None = None
+    ) -> None:
         super().__init__(parent)
         self._capture = capture
         self._ocr = ocr or EasyOCRProvider()

@@ -23,6 +23,7 @@ import pathlib
 import re
 import threading
 import time
+from typing import Any
 
 # pyrefly: ignore [missing-import]
 import argostranslate.package
@@ -131,7 +132,7 @@ def get_installed_pairs() -> list[tuple[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _install_package(pkg) -> bool:
+def _install_package(pkg: Any) -> bool:
     """Download and install one language pack. Returns False (after logging) if that fails."""
     pair = f"{pkg.from_code} → {pkg.to_code}"
     log.info("[Translator] ⬇  Downloading %s language pack (~100 MB)…", pair)
@@ -182,11 +183,11 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
         # Fall through — we may still find the package in a stale index
 
     # ── Decide which packs are needed ──────────────────────────────────────
-    available: dict[tuple[str, str], object] = {}
+    available: dict[tuple[str, str], Any] = {}
     for p in argostranslate.package.get_available_packages():
         available.setdefault((p.from_code, p.to_code), p)
 
-    needed: list = []
+    needed: list[Any] = []
     direct = available.get((from_code, to_code))
     if direct is not None:
         needed = [direct]
@@ -311,7 +312,7 @@ _SENTENCE_BREAK_RE = re.compile(r"[.!?;:。！？]\s*\S")
 _model_load_lock = threading.Lock()
 
 
-def _get_translation(from_code: str, to_code: str):
+def _get_translation(from_code: str, to_code: str) -> Any:
     """Return Argos' ITranslation for the pair, or None if unavailable."""
     installed = argostranslate.translate.get_installed_languages()
     from_lang = next((lang for lang in installed if lang.code == from_code), None)
@@ -321,7 +322,7 @@ def _get_translation(from_code: str, to_code: str):
     return from_lang.get_translation(to_lang)
 
 
-def _ensure_ct2_translator(pt) -> None:
+def _ensure_ct2_translator(pt: Any) -> None:
     """Load pt.translator (same arguments Argos uses). Falls back to CPU if
     the CUDA load fails."""
     if pt.translator is not None:
@@ -331,7 +332,7 @@ def _ensure_ct2_translator(pt) -> None:
             return
         model_path = str(pt.pkg.package_path / "model")
 
-        def _load():
+        def _load() -> Any:
             return ctranslate2.Translator(
                 model_path,
                 device=_argo_settings.device,
@@ -351,7 +352,7 @@ def _ensure_ct2_translator(pt) -> None:
             pt.translator = _load()
 
 
-def _split_sentences(pt, text: str) -> list[str]:
+def _split_sentences(pt: Any, text: str) -> list[str]:
     text = text.strip()
     if not text:
         return []
@@ -360,7 +361,7 @@ def _split_sentences(pt, text: str) -> list[str]:
     return pt.sentencizer.split_sentences(text)
 
 
-def _batch_package(pt, texts: list[str]) -> list[str]:
+def _batch_package(pt: Any, texts: list[str]) -> list[str]:
     """Translate texts with one translate_batch call on a PackageTranslation."""
     _ensure_ct2_translator(pt)
     pkg = pt.pkg
@@ -406,7 +407,7 @@ def _batch_package(pt, texts: list[str]) -> list[str]:
     return out
 
 
-def _batch_translation(translation, texts: list[str]) -> list[str]:
+def _batch_translation(translation: Any, texts: list[str]) -> list[str]:
     """Dispatch on Argos' translation wrapper types."""
     if isinstance(translation, argostranslate.translate.CachedTranslation):
         return _batch_translation(translation.underlying, texts)

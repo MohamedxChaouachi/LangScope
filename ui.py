@@ -36,6 +36,7 @@ from PyQt6.QtGui import (
     QPen,
     QPixmap,
     QScreen,
+    QShowEvent,
 )
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -49,6 +50,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from models import BBox
 from render_utils import draw_translated_text
 from screen_utils import local_rect_to_native, screen_at_native_point, screen_index
 from theme import (
@@ -95,6 +97,10 @@ from theme import (
 
 # Primary UI font family (first available), used where QFont is set directly.
 _UI_FONT = "Segoe UI Variable Display"
+
+# What the live feed draws for one region: (bbox, original_text, translated_text), optionally
+# followed by (region_id, confidence) for the debug overlay.
+Detection = tuple[BBox, str, str] | tuple[BBox, str, str, str, float]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Assets
@@ -162,7 +168,7 @@ class _ScreenSelectorWindow(QWidget):
         self.setScreen(screen)
         self.setGeometry(screen.geometry())
 
-    def showEvent(self, e) -> None:
+    def showEvent(self, e: QShowEvent | None) -> None:
         # Re-apply after the native window exists so mixed-DPI setups land on
         # the right screen.
         self.setScreen(self._screen)
@@ -239,7 +245,7 @@ class RegionSelector(QObject):
 
     region_selected = pyqtSignal(int, int, int, int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._windows: list[_ScreenSelectorWindow] = []
 
@@ -304,12 +310,12 @@ class LiveFeedWidget(QWidget):
 
     _PLACEHOLDER = "📺  Select a region and press  ▶ Start\nto see the live preview"
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(250)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._pixmap: QPixmap | None = None
-        self._detections: list = []
+        self._detections: list[Detection] = []
         self._orig_w: int = 1
         self._orig_h: int = 1
         self._debug_mode: bool = False
@@ -321,7 +327,7 @@ class LiveFeedWidget(QWidget):
     def update_frame(
         self,
         frame_bgr: np.ndarray,
-        detections: list,
+        detections: list[Detection],
         orig_w: int,
         orig_h: int,
     ) -> None:
@@ -427,7 +433,7 @@ class ControlPanel(QWidget):
     overlay_toggled = pyqtSignal(bool)
     debug_toggled = pyqtSignal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._running = False
         self.setWindowTitle("LangScope")
@@ -652,7 +658,9 @@ class ControlPanel(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def update_live_feed(self, frame_bgr, detections: list, orig_w: int, orig_h: int) -> None:
+    def update_live_feed(
+        self, frame_bgr: np.ndarray, detections: list[Detection], orig_w: int, orig_h: int
+    ) -> None:
         self._feed.update_frame(frame_bgr, detections, orig_w, orig_h)
 
     def set_debug(self, enabled: bool) -> None:

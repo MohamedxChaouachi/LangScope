@@ -17,8 +17,11 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from types import ModuleType
 
 import numpy as np
+
+from models import Region
 
 log = logging.getLogger("langscope.capture")
 
@@ -39,7 +42,7 @@ def _primary_monitor_rect() -> tuple[int, int, int, int]:
     return m["left"], m["top"], m["width"], m["height"]
 
 
-def _try_dxcam():
+def _try_dxcam() -> ModuleType | None:
     try:
         import dxcam
 
@@ -58,9 +61,9 @@ class CaptureManager:
         cm.stop()
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.latest_frame: np.ndarray | None = None
-        self._region: dict = {"top": 0, "left": 0, "width": 800, "height": 600}
+        self._region: Region = {"top": 0, "left": 0, "width": 800, "height": 600}
         self._region_lock = threading.Lock()
         self._running: bool = False
         self._thread: threading.Thread | None = None
@@ -70,7 +73,7 @@ class CaptureManager:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def start(self, region: dict) -> None:
+    def start(self, region: Region) -> None:
         self.set_region(region)
         if self._running:
             return
@@ -88,9 +91,9 @@ class CaptureManager:
         self._thread = None
         log.debug("CaptureManager stopped.")
 
-    def set_region(self, region: dict) -> None:
+    def set_region(self, region: Region) -> None:
         with self._region_lock:
-            self._region = dict(region)
+            self._region = region.copy()
 
     # ── Loops ─────────────────────────────────────────────────────────────────
 

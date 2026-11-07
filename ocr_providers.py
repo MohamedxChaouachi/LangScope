@@ -27,6 +27,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 import cv2
 import numpy as np
@@ -284,7 +285,7 @@ class EasyOCRProvider(BaseOCR):
 
         return segments
 
-    def _readtext(self, reader, img: np.ndarray):
+    def _readtext(self, reader: Any, img: np.ndarray) -> list[tuple[Any, str, float]]:
         """readtext with GPU batching, backing off to smaller batches if the
         card runs out of VRAM (large regions) instead of failing the frame."""
         while True:
@@ -304,7 +305,7 @@ class EasyOCRProvider(BaseOCR):
 
     # ── Reader cache ──────────────────────────────────────────────────────────
 
-    def _get_reader(self, langs: list[str]):
+    def _get_reader(self, langs: list[str]) -> Any:
         import easyocr
 
         key = tuple(sorted(langs))
@@ -328,7 +329,7 @@ class EasyOCRProvider(BaseOCR):
             return r
 
     @staticmethod
-    def _apply_fp16(reader) -> None:
+    def _apply_fp16(reader: Any) -> None:
         """
         Cast the detector + recognizer nets to fp16 in place. EasyOCR
         doesn't expose this as a constructor argument, so we reach into

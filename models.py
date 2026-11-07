@@ -7,14 +7,33 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import TypedDict
+
+# A text box as four (x, y) corner points, clockwise from the top-left, as EasyOCR reports them.
+# Read-only: use it for anything that only looks at a box.
+BBox = Sequence[Sequence[float]]
+# The same box as lists that can be changed in place, such as a region's smoothed position.
+MutableBBox = list[list[float]]
+# The same box frozen, as it is published to other threads.
+FrozenBBox = tuple[tuple[float, float], ...]
+
+
+class Region(TypedDict):
+    """A screen region in native desktop pixels, in the form mss and dxcam take."""
+
+    top: int
+    left: int
+    width: int
+    height: int
 
 
 @dataclass
 class RawSegment:
     """A single OCR detection before translation."""
 
-    bbox: list  # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+    bbox: BBox
     text: str
     score: float
 
@@ -30,7 +49,7 @@ class RegionSnapshot:
     """
 
     region_id: str
-    smoothed_bbox: tuple[tuple[float, float], ...]
+    smoothed_bbox: FrozenBBox
     original_text: str
     translated_text: str
     confidence: float
@@ -62,20 +81,19 @@ class TranslationRegion:
                             matched and pruned.
     """
 
-    bbox: list
+    bbox: BBox
     original_text: str
     translated_text: str
     timestamp: float = field(default_factory=time.monotonic)
     region_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     confidence: float = 1.0
     last_seen: float = field(default_factory=time.monotonic)
-    smoothed_bbox: list = field(default=None)  # set in __post_init__
     miss_count: int = 0
+    smoothed_bbox: MutableBBox = field(init=False)  # a copy of bbox, set in __post_init__
 
     def __post_init__(self) -> None:
-        if self.smoothed_bbox is None:
-            # Deep-copy bbox as initial smoothed position
-            self.smoothed_bbox = [list(pt) for pt in self.bbox]
+        # Deep copy: the smoothed position is changed in place, bbox never is.
+        self.smoothed_bbox = [list(pt) for pt in self.bbox]
 
     @property
     def has_translation(self) -> bool:
@@ -93,7 +111,7 @@ class TranslationRegion:
 
     # ── Smoothing ──────────────────────────────────────────────────────────────
 
-    def apply_smoothing(self, new_bbox: list, alpha: float = 0.35) -> None:
+    def apply_smoothing(self, new_bbox: BBox, alpha: float = 0.35) -> None:
         """
         Exponential Moving Average on each corner coordinate.
 

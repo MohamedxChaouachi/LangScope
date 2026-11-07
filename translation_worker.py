@@ -41,9 +41,9 @@ import threading
 import time
 from collections import OrderedDict, deque
 
-from PyQt6.QtCore import QThread
+from PyQt6.QtCore import QObject, QThread
 
-from models import RawSegment, RegionSnapshot, TranslationRegion
+from models import BBox, RawSegment, RegionSnapshot, TranslationRegion
 from translation_providers import ArgosTranslator, BaseTranslator
 
 log = logging.getLogger("langscope.translation_worker")
@@ -112,7 +112,7 @@ def _thash(text: str) -> str:
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
 
-def _bbox_rect(bbox: list) -> tuple[float, float, float, float]:
+def _bbox_rect(bbox: BBox) -> tuple[float, float, float, float]:
     """Return (x1, y1, x2, y2) from a 4-point bbox.
 
     Plain-Python min/max: ~10x faster than building a NumPy array for 4 points,
@@ -122,7 +122,7 @@ def _bbox_rect(bbox: list) -> tuple[float, float, float, float]:
     return float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))
 
 
-def _iou(bbox_a: list, bbox_b: list) -> float:
+def _iou(bbox_a: BBox, bbox_b: BBox) -> float:
     """Intersection-over-Union of two 4-point bboxes."""
     ax1, ay1, ax2, ay2 = _bbox_rect(bbox_a)
     bx1, by1, bx2, by2 = _bbox_rect(bbox_b)
@@ -251,7 +251,9 @@ class TranslationWorker(QThread):
     directly, since nothing else is touching that state.
     """
 
-    def __init__(self, translator: BaseTranslator | None = None, parent=None):
+    def __init__(
+        self, translator: BaseTranslator | None = None, parent: QObject | None = None
+    ) -> None:
         super().__init__(parent)
         self._translator: BaseTranslator = translator or ArgosTranslator()
         self._from_code = "en"
