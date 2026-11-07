@@ -1,9 +1,0 @@
-# Development and test tooling.
-# Install on top of requirements.txt (full app) or requirements-ci.txt (lightweight, no ML stack).
-pytest>=8.0
-pytest-qt>=4.4
-# ruff's formatter output can change between minor releases, so stay on one minor version.
-ruff~=0.17.4
-# pyright adds new checks in most releases, so every machine and CI run uses the same one.
-# (mypy is not used: 2.4.1 fails on a syntax error in PyQt6 6.12's own QtGui.pyi.)
-pyright==1.1.414
