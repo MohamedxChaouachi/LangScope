@@ -549,16 +549,21 @@ class TranslationWorker(QThread):
         try:
             # One batched model call; result is aligned 1:1 with `texts`
             # (no newline join/split, so multi-line OCR text can't misalign).
-            translated = self._translator.translate_many(texts, fc, tc)
+            translated, succeeded = self._translator.translate_many_with_status(texts, fc, tc)
         except Exception as exc:
             log.exception("Translation error: %s", exc)
             translated = texts
+            succeeded = [False] * len(texts)
         self.translate_ms = (time.perf_counter() - t0) * 1000
         log.debug("Batch translate %.1f ms (%d texts)", self.translate_ms, len(hash_order))
 
-        for h, original, tx in zip(hash_order, texts, translated):
-            tx = (tx or "").strip() or original
-            self._tx_cache.put(h, tx)
+        for index, h in enumerate(hash_order):
+            original = texts[index]
+            tx = translated[index] if index < len(translated) else ""
+            successful = index < len(succeeded) and succeeded[index] and bool(tx and tx.strip())
+            tx = tx.strip() if successful else original
+            if successful:
+                self._tx_cache.put(h, tx)
             for reg in unique[h]:
                 reg.translated_text = tx
 

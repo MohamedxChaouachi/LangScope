@@ -416,15 +416,18 @@ def _batch_translation(translation: Any, texts: list[str]) -> list[str]:
     return [translation.translate(t) for t in texts]
 
 
-def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
+def translate_many_with_status(
+    texts: list[str], from_code: str, to_code: str
+) -> tuple[list[str], list[bool]]:
     """
     Translate several independent strings with a single batched model call.
 
     Returns a list aligned 1:1 with *texts*. Identical strings are translated
     once, blank strings and same-language requests pass through unchanged, and
-    any failure returns the original text for the affected entries.
+    any failure returns the original text and a false success flag for the affected entries.
     """
-    results: list[str | None] = [None] * len(texts)
+    results = list(texts)
+    succeeded = [True] * len(texts)
     pending: dict[str, list[int]] = {}  # unique text -> indices to fill
 
     for i, text in enumerate(texts):
@@ -441,22 +444,34 @@ def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
             if translation is None:
                 log.warning("[Translator] ⚠  No translation path for %s->%s", from_code, to_code)
                 translated = list(unique)
+                batch_succeeded = False
             else:
                 translated = _batch_translation(translation, unique)
+                batch_succeeded = True
         except Exception:
             log.exception("Batch translation failed (%s->%s)", from_code, to_code)
             translated = list(unique)
+            batch_succeeded = False
         log.debug(
             "[Translator] translate_many %d texts in %.1f ms",
             len(unique),
             (time.perf_counter() - t0) * 1000,
         )
 
-        for text, tx in zip(unique, translated):
-            for i in pending[text]:
-                results[i] = tx
+        for unique_index, text in enumerate(unique):
+            tx = translated[unique_index] if unique_index < len(translated) else ""
+            successful = batch_succeeded and bool(tx and tx.strip())
+            for result_index in pending[text]:
+                results[result_index] = tx if successful else text
+                succeeded[result_index] = successful
 
-    return [r if r is not None else texts[i] for i, r in enumerate(results)]
+    return results, succeeded
+
+
+def translate_many(texts: list[str], from_code: str, to_code: str) -> list[str]:
+    """Translate several strings, falling back to the original for failed entries."""
+    translated, _ = translate_many_with_status(texts, from_code, to_code)
+    return translated
 
 
 def preload_model(from_code: str, to_code: str) -> bool:

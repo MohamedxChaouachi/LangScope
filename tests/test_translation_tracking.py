@@ -365,18 +365,10 @@ class TestTranslatorAnswers:
         by_text = {r.original_text: r for r in worker._regions.values()}
         assert by_text["Second line of text"].translated_text == "[fr] Second line of text"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "A failed translation is cached as if it were the translation: the worker stores "
-            "the untranslated text, so once the translator works again the same text is still "
-            "shown untranslated, until the language changes or the entry is evicted."
-        ),
-    )
     def test_a_text_whose_translation_failed_is_tried_again(self, worker, translator):
         translator.error = RuntimeError("out of memory")
         worker._update([seg(SENTENCE, y=10)])
+        assert len(worker._tx_cache) == 0
         translator.error = None
         worker._update([seg(SENTENCE, y=300)])  # the same text, in a new region
         newest = list(worker._regions.values())[-1]
@@ -514,9 +506,8 @@ class TestPruning:
         strict=True,
         raises=AssertionError,
         reason=(
-            "_prune() only runs after a second without messages, so while OCR keeps producing "
-            "batches, dead regions (past MAX_MISSES) pile up in _regions, and every later pass "
-            "has more of them to scan. The module docstring documents when _prune() runs."
+            "Dead regions past MAX_MISSES are not pruned while OCR batches keep arriving because "
+            "_prune() only runs when the mailbox is idle."
         ),
     )
     def test_dead_regions_are_removed_while_batches_keep_arriving(

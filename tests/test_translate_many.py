@@ -39,6 +39,19 @@ def sent(model, call=0):
 
 
 class TestAlignment:
+    def test_a_failed_model_batch_returns_originals_with_failure_status(
+        self, translator_module, fake_argos
+    ):
+        fake_argos.pair("en", "fr")
+        fake_argos.model("en", "fr").error = RuntimeError("temporary model error")
+
+        translated, succeeded = translator_module.translate_many_with_status(
+            ["Hello world", "Good morning"], "en", "fr"
+        )
+
+        assert translated == ["Hello world", "Good morning"]
+        assert succeeded == [False, False]
+
     def test_each_result_belongs_to_the_input_at_its_position(self, translate_many, fake_argos):
         fake_argos.pair("en", "fr")
         out = translate_many(["Hello world", "Good morning", "Thank you very much"], "en", "fr")

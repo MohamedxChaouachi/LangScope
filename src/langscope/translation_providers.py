@@ -25,6 +25,13 @@ class BaseTranslator(ABC):
         batch should override."""
         return [self.translate(t, from_code, to_code) for t in texts]
 
+    def translate_many_with_status(
+        self, texts: list[str], from_code: str, to_code: str
+    ) -> tuple[list[str], list[bool]]:
+        """Return aligned translations and success flags; errors propagate to the caller."""
+        translated = self.translate_many(texts, from_code, to_code)
+        return translated, [True] * len(translated)
+
     def warm_up(self, from_code: str, to_code: str) -> bool:
         """Pre-load models so the first real call is fast. Returns True when
         the pair is ready. No-op (True) by default."""
@@ -46,6 +53,13 @@ class ArgosTranslator(BaseTranslator):
         from langscope import translator as _t
 
         return _t.translate_many(texts, from_code, to_code)
+
+    def translate_many_with_status(
+        self, texts: list[str], from_code: str, to_code: str
+    ) -> tuple[list[str], list[bool]]:
+        from langscope import translator as _t
+
+        return _t.translate_many_with_status(texts, from_code, to_code)
 
     def warm_up(self, from_code: str, to_code: str) -> bool:
         from langscope import translator as _t
