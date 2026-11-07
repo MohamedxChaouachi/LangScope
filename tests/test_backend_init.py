@@ -9,7 +9,6 @@ The ML packages are replaced by fakes, so these run without them (as in CI) and 
 the real Argos data directory or the GPU.
 """
 
-import importlib
 import logging
 import pathlib
 import sys
@@ -17,8 +16,9 @@ import types
 
 import pytest
 
-import ocr_providers
-from ocr_providers import BACKEND, EasyOCRProvider, init_ocr_backend
+from langscope import ocr_providers
+from langscope.ocr_providers import BACKEND, EasyOCRProvider, init_ocr_backend
+from tests.helpers import fresh_import
 
 
 class TestTranslationBackend:
@@ -42,11 +42,8 @@ class TestTranslationBackend:
         self, fake_argos, gpu, monkeypatch
     ):
         # The GPU has to be there before the import, or an import-time switch would not show.
-        monkeypatch.delitem(sys.modules, "translator", raising=False)
-        try:
-            importlib.import_module("translator")
-        finally:
-            sys.modules.pop("translator", None)
+        with fresh_import("langscope.translator"):
+            pass
         settings = fake_argos.settings
         assert (settings.device, settings.compute_type) == ("cpu", "auto")
 
@@ -163,10 +160,9 @@ class TestOcrBackend:
     def test_importing_the_module_does_not_touch_torch(self, monkeypatch):
         torch = FakeTorch(cuda_available=True)
         monkeypatch.setitem(sys.modules, "torch", torch)
-        monkeypatch.delitem(sys.modules, "ocr_providers")
-        fresh = importlib.import_module("ocr_providers")
-        assert torch.touched == []
-        assert (fresh.BACKEND.use_gpu, fresh.BACKEND.batch_size) == (False, 1)
+        with fresh_import("langscope.ocr_providers") as fresh:
+            assert torch.touched == []
+            assert (fresh.BACKEND.use_gpu, fresh.BACKEND.batch_size) == (False, 1)
 
     def test_with_a_gpu_ocr_runs_on_it_in_batches_of_16(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "torch", FakeTorch(cuda_available=True))

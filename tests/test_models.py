@@ -10,7 +10,7 @@ Nothing is mocked; TranslationRegion has no external dependencies.
 
 import pytest
 
-from models import TranslationRegion
+from langscope.models import TranslationRegion
 
 
 def _square(x1, y1, x2, y2):

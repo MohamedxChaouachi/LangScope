@@ -20,9 +20,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QPaintEvent
 from PyQt6.QtWidgets import QWidget
 
-from models import Region, RegionSnapshot
-from render_utils import draw_translated_text
-from screen_utils import native_region_to_logical
+from langscope.models import Region, RegionSnapshot
+from langscope.render_utils import draw_translated_text
+from langscope.screen_utils import native_region_to_logical
 
 
 class OverlayWindow(QWidget):

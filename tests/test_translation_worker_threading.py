@@ -12,10 +12,10 @@ import threading
 
 import pytest
 
-from models import RawSegment
+from langscope.models import RawSegment
+from langscope.translation_providers import BaseTranslator
+from langscope.translation_worker import TranslationWorker
 from tests.helpers import bbox
-from translation_providers import BaseTranslator
-from translation_worker import TranslationWorker
 
 SENTENCE = "Hello brave new world"
 
@@ -124,7 +124,7 @@ class TestLanguageChanges:
 
 class TestSnapshots:
     def test_latest_regions_is_an_immutable_snapshot(self, worker):
-        from models import RegionSnapshot
+        from langscope.models import RegionSnapshot
 
         worker.set_languages("en", "fr")
         worker._update([segment()])
@@ -167,7 +167,7 @@ class TestSnapshots:
 
 class TestMailbox:
     def make(self, max_batches=2):
-        from translation_worker import _Mailbox
+        from langscope.translation_worker import _Mailbox
 
         return _Mailbox(max_batches)
 

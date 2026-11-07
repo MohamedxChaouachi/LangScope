@@ -22,14 +22,14 @@ import logging
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
-from capture_manager import CaptureManager
-from models import Region
-from ocr_worker import OCRWorker
-from overlay_window import OverlayWindow
-from render_gate import RenderGate
-from translation_providers import ArgosLanguagePacks, LanguagePacks
-from translation_worker import TranslationWorker
-from ui import ControlPanel
+from langscope.capture_manager import CaptureManager
+from langscope.models import Region
+from langscope.ocr_worker import OCRWorker
+from langscope.overlay_window import OverlayWindow
+from langscope.render_gate import RenderGate
+from langscope.translation_providers import ArgosLanguagePacks, LanguagePacks
+from langscope.translation_worker import TranslationWorker
+from langscope.ui import ControlPanel
 
 log = logging.getLogger("langscope.controller")
 

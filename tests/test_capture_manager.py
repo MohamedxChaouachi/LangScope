@@ -14,7 +14,7 @@ import types
 import numpy as np
 import pytest
 
-import capture_manager
+from langscope import capture_manager
 
 PRIMARY = {"left": 0, "top": 0, "width": 1920, "height": 1080, "is_primary": True}
 SECOND = {"left": 1920, "top": 0, "width": 1920, "height": 1080}

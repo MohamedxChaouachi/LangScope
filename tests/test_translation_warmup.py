@@ -6,9 +6,9 @@ tries again straight away when told that the pack has finished installing.
 
 import pytest
 
-import translation_worker
-from translation_providers import BaseTranslator
-from translation_worker import TranslationWorker
+from langscope import translation_worker
+from langscope.translation_providers import BaseTranslator
+from langscope.translation_worker import TranslationWorker
 
 
 class WarmUpTranslator(BaseTranslator):

@@ -1,7 +1,7 @@
 """OverlayWindow draws each region where the tracker currently has it."""
 
-from models import TranslationRegion
-from overlay_window import OverlayWindow
+from langscope.models import TranslationRegion
+from langscope.overlay_window import OverlayWindow
 from tests.helpers import bbox, painted_columns, render
 
 CAPTURE_RECT = {"top": 0, "left": 0, "width": 600, "height": 120}

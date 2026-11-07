@@ -11,8 +11,8 @@ of text does.
 import numpy as np
 import pytest
 
-import ocr_worker
-from ocr_worker import MIN_CHANGED_PX, PIXEL_DELTA, _content_changed, _hash_frame
+from langscope import ocr_worker
+from langscope.ocr_worker import MIN_CHANGED_PX, PIXEL_DELTA, _content_changed, _hash_frame
 
 HEIGHT, WIDTH = 100, 120
 HALF_COLUMNS = WIDTH // 2

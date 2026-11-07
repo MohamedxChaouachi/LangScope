@@ -3,7 +3,7 @@
 import numpy as np
 from PyQt6.QtGui import QColor
 
-from ui import LiveFeedWidget
+from langscope.ui import LiveFeedWidget
 
 
 def test_the_pixmap_does_not_share_memory_with_the_frame(qtbot):

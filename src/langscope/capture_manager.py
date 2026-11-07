@@ -21,7 +21,7 @@ from types import ModuleType
 
 import numpy as np
 
-from models import Region
+from langscope.models import Region
 
 log = logging.getLogger("langscope.capture")
 

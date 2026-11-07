@@ -1,20 +1,16 @@
 """
 Test configuration for LangScope.
 
-Ensures the project root (the directory containing translation_worker.py and
-models.py) is importable when pytest is run from anywhere, and makes Qt run without
-a display.
+The tests import the installed langscope package (pip install -e .), and Qt is made to run
+without a display.
 """
 
 import os
-import sys
 import time
 
 import pytest
 
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+from tests.helpers import fresh_import
 
 # Qt's offscreen platform renders into memory, so widget tests need no display (CI has none).
 # This must be set before the first QApplication is created. Set QT_QPA_PLATFORM yourself
@@ -50,7 +46,7 @@ def no_language_detection(monkeypatch):
     """Make the worker treat all text as not yet in the target language.
 
     langdetect is slow, and non-deterministic on short strings."""
-    import translation_worker
+    from langscope import translation_worker
 
     monkeypatch.setattr(translation_worker, "_already_target", lambda text, to_code: False)
 
@@ -68,9 +64,6 @@ def fake_argos(monkeypatch, tmp_path):
 @pytest.fixture
 def translator_module(fake_argos, monkeypatch):
     """The real translator.py, freshly imported against the fakes from `fake_argos`."""
-    monkeypatch.delitem(sys.modules, "translator", raising=False)
-    import translator
-
-    yield translator
-    # Do not leave a module bound to fakes behind for other tests to find.
-    sys.modules.pop("translator", None)
+    # Not left behind afterwards: other tests must not find a module that is bound to fakes.
+    with fresh_import("langscope.translator") as translator:
+        yield translator

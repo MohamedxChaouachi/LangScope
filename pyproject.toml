@@ -2,6 +2,8 @@
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The package lives in src/, so a fresh clone can run the tests without installing it.
+pythonpath = ["src"]
 # -ra lists every skipped test with its reason in the summary.
 addopts = "-ra"
 qt_api = "pyqt6"
@@ -9,6 +11,7 @@ qt_api = "pyqt6"
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+src = ["src", "."]
 
 [tool.ruff.lint]
 # Rule families are enabled one at a time; each is added together with the fixes it needs.
@@ -34,14 +37,17 @@ ignore = [
     "B905",
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["langscope"]
+
 [tool.ruff.lint.per-file-ignores]
-# bench_ocr.py is a command-line tool: its printed report is its output.
-"bench_ocr.py" = ["T201"]
+# The scripts are command-line tools: what they print is their output.
+"scripts/*.py" = ["T201"]
 
 [tool.pyright]
-# The application modules. The tests and the command-line scripts are not type-checked.
-include = ["*.py"]
-exclude = ["bench_ocr.py", "diag_ocr.py", "tests", ".venv"]
+# The package. The tests and the command-line scripts are not type-checked.
+include = ["src/langscope"]
+extraPaths = ["src"]
 # "standard" is pyright's default. "basic" would switch off reportIncompatibleMethodOverride,
 # which this project wants on (see the Qt event handlers, which opt out one line at a time).
 typeCheckingMode = "standard"

@@ -22,7 +22,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QGuiApplication, QScreen
 
-from models import Region
+from langscope.models import Region
 
 
 def screen_native_rect(screen: QScreen) -> QRect:

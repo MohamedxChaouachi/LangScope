@@ -10,7 +10,7 @@ import random
 import pytest
 from PyQt6.QtGui import QFont, QFontMetrics
 
-from render_utils import _wrap_lines
+from langscope.render_utils import _wrap_lines
 
 
 class FakeMetrics:

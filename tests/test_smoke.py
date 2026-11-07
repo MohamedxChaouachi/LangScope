@@ -23,14 +23,14 @@ import numpy as np
 import pytest
 from PyQt6.QtWidgets import QCheckBox, QLabel
 
+import langscope
+from langscope.translation_providers import BaseTranslator
 from tests.helpers import bbox, render
-from translation_providers import BaseTranslator
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+PACKAGE_DIR = pathlib.Path(langscope.__file__).parent
 
-# Top-level scripts that are not part of the application and must never be imported by a test,
-# such as the git-ignored diag_ocr.py scratch script, which runs OCR as soon as it is imported.
-_NOT_APP_MODULES = {"diag_ocr"}
+# Modules that are not imported by name: importing __main__ would run the application.
+_NOT_IMPORTED = {"__init__", "__main__"}
 
 # Modules that import the ML packages at module level, and the packages they need.
 _NEEDS_ML_PACKAGES = {
@@ -40,7 +40,7 @@ _NEEDS_ML_PACKAGES = {
 
 
 def _app_modules() -> list[str]:
-    return sorted(p.stem for p in ROOT.glob("*.py") if p.stem not in _NOT_APP_MODULES)
+    return sorted(p.stem for p in PACKAGE_DIR.glob("*.py") if p.stem not in _NOT_IMPORTED)
 
 
 # ── Imports ──────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ def test_module_imports(module_name):
             package,
             reason=f"{module_name} imports {package}, a heavy dependency that CI does not install",
         )
-    importlib.import_module(module_name)
+    importlib.import_module(f"langscope.{module_name}")
 
 
 def test_main_imports_with_translator_stubbed(monkeypatch):
@@ -69,8 +69,11 @@ def test_main_imports_with_translator_stubbed(monkeypatch):
     ui.py no longer defines. Loaded under a private name so the cached module is not reused
     by test_module_imports.
     """
-    monkeypatch.setitem(sys.modules, "translator", types.ModuleType("translator"))
-    spec = importlib.util.spec_from_file_location("main_under_test", ROOT / "main.py")
+    stub = types.ModuleType("langscope.translator")
+    monkeypatch.setitem(sys.modules, "langscope.translator", stub)
+    # `from langscope import translator` looks at the package's attribute before sys.modules.
+    monkeypatch.setattr(langscope, "translator", stub, raising=False)
+    spec = importlib.util.spec_from_file_location("main_under_test", PACKAGE_DIR / "main.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert callable(module.main)
@@ -80,7 +83,7 @@ def test_main_imports_with_translator_stubbed(monkeypatch):
 
 
 def test_control_panel_builds_with_its_controls(qtbot):
-    from ui import ControlPanel
+    from langscope.ui import ControlPanel
 
     panel = ControlPanel()
     qtbot.addWidget(panel)
@@ -101,7 +104,7 @@ def test_control_panel_builds_with_its_controls(qtbot):
 
 
 def test_control_panel_shows_stats_only_in_debug_mode(qtbot):
-    from ui import ControlPanel
+    from langscope.ui import ControlPanel
 
     panel = ControlPanel()
     qtbot.addWidget(panel)
@@ -121,7 +124,7 @@ def test_control_panel_shows_stats_only_in_debug_mode(qtbot):
 
 
 def test_live_feed_paints_translations(qtbot):
-    from ui import LiveFeedWidget
+    from langscope.ui import LiveFeedWidget
 
     feed = LiveFeedWidget()
     qtbot.addWidget(feed)
@@ -140,8 +143,8 @@ def test_live_feed_paints_translations(qtbot):
 
 
 def test_overlay_window_builds_and_paints_regions(qtbot):
-    from models import TranslationRegion
-    from overlay_window import OverlayWindow
+    from langscope.models import TranslationRegion
+    from langscope.overlay_window import OverlayWindow
 
     overlay = OverlayWindow()
     qtbot.addWidget(overlay)
@@ -168,8 +171,8 @@ class _FakeTranslator(BaseTranslator):
 
 def test_translation_worker_thread_publishes_translated_regions(qtbot, monkeypatch):
     """Runs the real worker thread. Linters cannot see an AttributeError inside run()."""
-    import translation_worker
-    from models import RawSegment
+    from langscope import translation_worker
+    from langscope.models import RawSegment
 
     # Language detection is irrelevant here, and langdetect is non-deterministic on short text.
     monkeypatch.setattr(translation_worker, "_already_target", lambda text, to_code: False)

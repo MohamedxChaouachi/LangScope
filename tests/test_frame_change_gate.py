@@ -7,8 +7,8 @@ It remembers the last frame that was sent to OCR and compares each new frame wit
 import numpy as np
 import pytest
 
-import ocr_worker
-from ocr_worker import FrameChangeGate
+from langscope import ocr_worker
+from langscope.ocr_worker import FrameChangeGate
 from tests.test_change_detection import MIN_CHANGED_PX, PIXEL_DELTA, blank, change_pixels
 
 

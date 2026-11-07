@@ -1,15 +1,15 @@
 """
-bench_ocr.py — OCR pipeline benchmark harness.
+scripts/bench_ocr.py — OCR pipeline benchmark harness.
 
 Grabs N real frames from a screen region, runs them through the actual preprocess() +
 EasyOCRProvider.read() pipeline the app uses, and reports timing statistics over all of
 them, not a single sample.
 
 Usage:
-    python bench_ocr.py                       # default: 20 frames, en, GPU auto
-    python bench_ocr.py --frames 40 --lang fr
-    python bench_ocr.py --top 100 --left 100 --width 600 --height 300
-    python bench_ocr.py --fp16                # test experimental fp16 path
+    python scripts/bench_ocr.py                       # default: 20 frames, en, GPU auto
+    python scripts/bench_ocr.py --frames 40 --lang fr
+    python scripts/bench_ocr.py --top 100 --left 100 --width 600 --height 300
+    python scripts/bench_ocr.py --fp16                # test experimental fp16 path
 
 What it reports:
     - the preprocess / inference split, not just a single "OCR took X ms"
@@ -28,7 +28,7 @@ import time
 import numpy as np
 from mss import mss
 
-import ocr_providers as ocrp
+from langscope import ocr_providers as ocrp
 
 
 def grab_frames(region: dict, n: int) -> list[np.ndarray]:
@@ -98,7 +98,7 @@ def run(args: argparse.Namespace) -> None:
     summarize("total per frame", total_samples)
     print()
     print(f"Effective max sustained FPS: {1000 / statistics.mean(total_samples):.1f}")
-    print("(Compare this against OCR_FPS=8 in ocr_worker.py — if the mean")
+    print("(Compare this against OCR_FPS=8 in langscope/ocr_worker.py — if the mean")
     print(" total is above 125ms, the pipeline is inference-bound, not")
     print(" gated by the 8 FPS target, and the real fix is a smaller")
     print(" capture region or fewer/cheaper preprocessing steps.)")

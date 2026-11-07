@@ -2,11 +2,40 @@
 
 from __future__ import annotations
 
+import contextlib
+import importlib
 import sys
 import traceback
+from collections.abc import Iterator
+from types import ModuleType
 
 import numpy as np
 from PyQt6.QtGui import QImage
+
+_MISSING = object()
+
+
+@contextlib.contextmanager
+def fresh_import(name: str) -> Iterator[ModuleType]:
+    """Import the module `name` anew, then put back whatever was there before.
+
+    Both places that name a submodule are restored: sys.modules, and the attribute on its
+    parent package. After `import a.b`, `from a import b` answers with that attribute, so a
+    stale one would hand a module that is bound to fakes to the tests that run later."""
+    parent_name, _, child = name.rpartition(".")
+    parent = importlib.import_module(parent_name)
+    old_module = sys.modules.pop(name, _MISSING)
+    old_attr = getattr(parent, child, _MISSING)
+    try:
+        yield importlib.import_module(name)
+    finally:
+        sys.modules.pop(name, None)
+        if old_module is not _MISSING:
+            sys.modules[name] = old_module
+        if hasattr(parent, child):
+            delattr(parent, child)
+        if old_attr is not _MISSING:
+            setattr(parent, child, old_attr)
 
 
 def bbox(x1: int, y1: int, x2: int, y2: int) -> list[list[int]]:

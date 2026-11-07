@@ -44,8 +44,8 @@ from typing import Any
 
 from PyQt6.QtCore import QObject, QThread
 
-from models import BBox, RawSegment, RegionSnapshot, TranslationRegion
-from translation_providers import ArgosTranslator, BaseTranslator
+from langscope.models import BBox, RawSegment, RegionSnapshot, TranslationRegion
+from langscope.translation_providers import ArgosTranslator, BaseTranslator
 
 log = logging.getLogger("langscope.translation_worker")
 

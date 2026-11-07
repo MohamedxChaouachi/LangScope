@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from config import LOG_FORMAT, Config, configure_logging, load_config
+from langscope.config import LOG_FORMAT, Config, configure_logging, load_config
 
 
 class TestLoadConfig:

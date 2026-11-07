@@ -51,10 +51,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from models import BBox
-from render_utils import draw_translated_text
-from screen_utils import local_rect_to_native, screen_at_native_point, screen_index
-from theme import (
+from langscope.models import BBox
+from langscope.render_utils import draw_translated_text
+from langscope.screen_utils import local_rect_to_native, screen_at_native_point, screen_index
+from langscope.theme import (
     COLOR_ACCENT,
     COLOR_ACCENT_SOFT,
     COLOR_BADGE,

@@ -12,8 +12,8 @@ have no external dependencies beyond difflib/re from the stdlib.
 
 import pytest
 
-import translation_worker
-from translation_worker import _TIMESTAMP_RE, _already_target, _iou, _numeric, _text_sim
+from langscope import translation_worker
+from langscope.translation_worker import _TIMESTAMP_RE, _already_target, _iou, _numeric, _text_sim
 
 
 def _square(x1, y1, x2, y2):

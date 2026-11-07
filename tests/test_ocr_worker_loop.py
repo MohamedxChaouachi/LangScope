@@ -8,7 +8,7 @@ against a fake capture and a fake OCR, to check that the loop obeys the gate.
 
 import pytest
 
-from ocr_worker import OCRWorker
+from langscope.ocr_worker import OCRWorker
 from tests.test_change_detection import MIN_CHANGED_PX, blank, change_pixels
 from tests.test_ocr_loading import FakeCapture, FakeOCR
 

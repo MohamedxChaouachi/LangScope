@@ -14,16 +14,16 @@ import numpy as np
 import pytest
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from controller import (
+from langscope.controller import (
     DEFAULT_REGION,
     RENDER_INTERVAL_MS,
     AppController,
     PackageSetupThread,
 )
-from models import RegionSnapshot
-from render_gate import RenderGate
-from translation_providers import LanguagePacks
-from ui import ControlPanel
+from langscope.models import RegionSnapshot
+from langscope.render_gate import RenderGate
+from langscope.translation_providers import LanguagePacks
+from langscope.ui import ControlPanel
 
 
 class FakeCapture:

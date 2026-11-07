@@ -14,11 +14,10 @@ from collections.abc import Sequence
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-import ocr_providers
-import translator
-from config import configure_logging, load_config
-from controller import build_controller
-from ui import APP_ICON_PATH
+from langscope import ocr_providers, translator
+from langscope.config import configure_logging, load_config
+from langscope.controller import build_controller
+from langscope.ui import APP_ICON_PATH
 
 
 def main(argv: Sequence[str] | None = None) -> int:

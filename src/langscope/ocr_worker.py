@@ -17,8 +17,8 @@ from typing import Any
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from capture_manager import CaptureManager
-from ocr_providers import BaseOCR, EasyOCRProvider
+from langscope.capture_manager import CaptureManager
+from langscope.ocr_providers import BaseOCR, EasyOCRProvider
 
 log = logging.getLogger("langscope.ocr_worker")
 

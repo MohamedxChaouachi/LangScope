@@ -15,8 +15,8 @@ import types
 import numpy as np
 import pytest
 
-from ocr_providers import BaseOCR
-from ocr_worker import OCRWorker
+from langscope.ocr_providers import BaseOCR
+from langscope.ocr_worker import OCRWorker
 
 MAIN_THREAD = threading.get_ident()
 
@@ -215,7 +215,7 @@ def fake_easyocr(monkeypatch):
 
 class TestEasyOCRProviderIsLazy:
     def make(self, from_code="en"):
-        from ocr_providers import EasyOCRProvider
+        from langscope.ocr_providers import EasyOCRProvider
 
         return EasyOCRProvider(from_code)
 
@@ -276,7 +276,7 @@ class TestGpuOutOfMemory:
 
     @pytest.fixture
     def gpu(self, monkeypatch):
-        import ocr_providers
+        from langscope import ocr_providers
 
         torch = types.ModuleType("torch")
         torch.cuda = types.SimpleNamespace(empty_cache=lambda: torch.cleared.append(1))
@@ -287,7 +287,7 @@ class TestGpuOutOfMemory:
         return torch
 
     def provider(self):
-        from ocr_providers import EasyOCRProvider
+        from langscope.ocr_providers import EasyOCRProvider
 
         return EasyOCRProvider("en")
 
@@ -324,7 +324,7 @@ class TestGpuOutOfMemory:
         assert Broken.calls == 1
 
     def test_on_the_cpu_an_out_of_memory_error_is_not_retried(self, monkeypatch):
-        import ocr_providers
+        from langscope import ocr_providers
 
         # The batch size is above 1 here so that it is the missing GPU, not a batch of one,
         # that rules out a retry. (Emptying the CUDA cache means nothing without a GPU.)
@@ -341,7 +341,7 @@ class TestOcrLogMessages:
 
     @pytest.fixture(autouse=True)
     def cpu_backend(self, monkeypatch):
-        import ocr_providers
+        from langscope import ocr_providers
 
         monkeypatch.setattr(ocr_providers.BACKEND, "use_gpu", False)
 
@@ -349,7 +349,7 @@ class TestOcrLogMessages:
         return [r.getMessage() for r in caplog.records if r.levelno >= level]
 
     def test_loading_a_reader_logs_what_is_loaded_and_how_long_it_took(self, fake_easyocr, caplog):
-        from ocr_providers import EasyOCRProvider
+        from langscope.ocr_providers import EasyOCRProvider
 
         provider = EasyOCRProvider("fr")
         with caplog.at_level(logging.INFO, logger=self.LOGGER):
@@ -359,8 +359,8 @@ class TestOcrLogMessages:
         assert re.fullmatch(r"\[OCR\] Reader ready in \d+ ms\.", ready)
 
     def test_the_load_time_is_reported_in_milliseconds(self, fake_easyocr, caplog, monkeypatch):
-        import ocr_providers
-        from ocr_providers import EasyOCRProvider
+        from langscope import ocr_providers
+        from langscope.ocr_providers import EasyOCRProvider
 
         ticks = iter([100.0, 102.5])  # the load starts at t=100 s and ends 2.5 s later
         clock = types.SimpleNamespace(perf_counter=lambda: next(ticks))
@@ -370,7 +370,7 @@ class TestOcrLogMessages:
         assert "[OCR] Reader ready in 2500 ms." in self.messages(caplog)
 
     def test_a_cached_reader_logs_nothing(self, fake_easyocr, caplog):
-        from ocr_providers import EasyOCRProvider
+        from langscope.ocr_providers import EasyOCRProvider
 
         provider = EasyOCRProvider("en")
         provider.load()
@@ -379,7 +379,7 @@ class TestOcrLogMessages:
         assert self.messages(caplog) == []
 
     def test_fp16_is_logged_when_applied_and_when_it_fails(self, caplog):
-        from ocr_providers import EasyOCRProvider
+        from langscope.ocr_providers import EasyOCRProvider
 
         class Net:
             def half(self):
@@ -402,7 +402,7 @@ class TestOcrLogMessages:
         assert failed.getMessage() == "[OCR] fp16 cast failed (boom) — staying fp32."
 
     def test_confidence_statistics_are_logged_and_the_window_starts_over(self, caplog):
-        from ocr_providers import EasyOCRProvider
+        from langscope.ocr_providers import EasyOCRProvider
 
         provider = EasyOCRProvider("en")
         for score in (0.4, 0.8):

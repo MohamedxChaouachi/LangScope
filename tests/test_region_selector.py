@@ -9,9 +9,9 @@ import pytest
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QGuiApplication, QKeyEvent, QMouseEvent
 
+from langscope.ui import _ScreenSelectorWindow
 from tests.helpers import render
 from tests.test_screen_utils import FakeScreen
-from ui import _ScreenSelectorWindow
 
 
 @pytest.fixture

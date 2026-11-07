@@ -7,11 +7,11 @@ that could only ever see texts the worker's cache had already missed.
 
 import pytest
 
-import translation_worker
-from models import RawSegment, TranslationRegion
+from langscope import translation_worker
+from langscope.models import RawSegment, TranslationRegion
+from langscope.translation_providers import BaseTranslator
+from langscope.translation_worker import TranslationWorker, _thash
 from tests.helpers import bbox
-from translation_providers import BaseTranslator
-from translation_worker import TranslationWorker, _thash
 
 
 class CountingTranslator(BaseTranslator):

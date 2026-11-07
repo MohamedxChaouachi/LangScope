@@ -6,7 +6,7 @@ measures how many frames per second were actually drawn.
 import numpy as np
 import pytest
 
-from render_gate import RenderGate
+from langscope.render_gate import RenderGate
 
 
 class Clock:

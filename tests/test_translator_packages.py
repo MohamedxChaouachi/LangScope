@@ -104,7 +104,7 @@ class TestArgosLanguagePacks:
 
     @pytest.fixture
     def packs(self, fake_argos, translator_module):
-        from translation_providers import ArgosLanguagePacks
+        from langscope.translation_providers import ArgosLanguagePacks
 
         return ArgosLanguagePacks()
 

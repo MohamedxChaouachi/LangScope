@@ -11,11 +11,10 @@ import logging
 
 import pytest
 
-import translation_worker
-from models import RawSegment
-from tests.helpers import bbox
-from translation_providers import BaseTranslator
-from translation_worker import (
+from langscope import translation_worker
+from langscope.models import RawSegment
+from langscope.translation_providers import BaseTranslator
+from langscope.translation_worker import (
     DISPLAY_GRACE_MISSES,
     EMA_ALPHA,
     IOU_THRESHOLD,
@@ -24,6 +23,7 @@ from translation_worker import (
     TEXT_SIM_THRESHOLD,
     TranslationWorker,
 )
+from tests.helpers import bbox
 
 SENTENCE = "Hello brave new world"
 

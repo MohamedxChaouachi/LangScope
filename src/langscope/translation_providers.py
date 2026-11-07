@@ -38,17 +38,17 @@ class ArgosTranslator(BaseTranslator):
     """Offline translation via Argos Translate. Delegates to translator.py."""
 
     def translate(self, text: str, from_code: str, to_code: str) -> str:
-        import translator as _t
+        from langscope import translator as _t
 
         return _t.translate_text(text, from_code, to_code)
 
     def translate_many(self, texts: list[str], from_code: str, to_code: str) -> list[str]:
-        import translator as _t
+        from langscope import translator as _t
 
         return _t.translate_many(texts, from_code, to_code)
 
     def warm_up(self, from_code: str, to_code: str) -> bool:
-        import translator as _t
+        from langscope import translator as _t
 
         return _t.preload_model(from_code, to_code)
 
@@ -70,11 +70,11 @@ class ArgosLanguagePacks(LanguagePacks):
     """Argos Translate language packs. Delegates to translator.py."""
 
     def is_installed(self, from_code: str, to_code: str) -> bool:
-        import translator as _t
+        from langscope import translator as _t
 
         return _t.is_package_installed(from_code, to_code)
 
     def install(self, from_code: str, to_code: str) -> bool:
-        import translator as _t
+        from langscope import translator as _t
 
         return _t.setup_translation_models(from_code, to_code)

@@ -10,8 +10,8 @@ logical pixels, which is what screen_utils is written for and what FakeScreen re
 import pytest
 from PyQt6.QtCore import QRect
 
-import screen_utils
-from screen_utils import (
+from langscope import screen_utils
+from langscope.screen_utils import (
     local_rect_to_native,
     native_region_to_logical,
     screen_at_native_point,
