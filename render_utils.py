@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 
-# Default appearance constants (previously duplicated inline in both widgets).
+# Default appearance of the translated-text box.
 _BG_COLOR = QColor(10, 12, 30, 235)
 _TEXT_COLOR = QColor("#E0F7FA")
 _PADDING = 8  # horizontal padding budget when fitting text (px)
@@ -80,7 +80,7 @@ def draw_translated_text(
     surface_w/h  : dimensions of the drawing surface, used to clamp the
                    background so nothing renders off-window.
     max_font_pt  : optional upper bound on the font point size. Pass None for
-                   no cap (matches the previous OverlayWindow behaviour).
+                   no cap.
     """
     # Auto-size font to bbox height, then optionally cap.
     font_pt = max(_MIN_FONT, int(bh * _HEIGHT_RATIO))

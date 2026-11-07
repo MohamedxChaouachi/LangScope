@@ -1,14 +1,18 @@
 """
 ui.py — Live Translator UI
 
-LiveFeedWidget renders:
-  1. The live screen capture frame (updated at ~60 FPS by render timer).
-  2. For each TranslationRegion: a filled background covering the original
-     text, then the translated text drawn at a font size matched to bbox height.
+The control panel window and the widgets inside it.
 
-ControlPanel adds:
-  - Overlay Mode toggle checkbox
-  - Live FPS counter in the status bar
+LiveFeedWidget renders:
+  1. The live screen capture frame (updated by the render timer).
+  2. For each tracked region: a filled background covering the original text, then the
+     translated text, drawn by render_utils.draw_translated_text.
+
+RegionSelector lets the user drag out the capture region on any screen; its result is
+emitted in native pixels (see screen_utils).
+
+ControlPanel holds the language pickers, region selection, start/stop, the Desktop Overlay and
+Debug Mode toggles, the status line with the FPS counter, and the debug stats strip.
 """
 
 from __future__ import annotations
@@ -250,7 +254,7 @@ class RegionSelector(QObject):
             w.show()
         self._focus_window_under_cursor()
 
-    # Kept so ControlPanel._open_selector needs no changes.
+    # ControlPanel shows, raises and activates the selector as if it were a single window.
     def activateWindow(self) -> None:
         self._focus_window_under_cursor()
 
@@ -292,12 +296,10 @@ class LiveFeedWidget(QWidget):
     Detections format: list[(bbox, original_text, translated_text, region_id?, confidence?)]
     The last two fields are optional — when absent, debug mode shows no metadata.
 
-    Improvements over v1:
-      - Uses smoothed_bbox coordinates (passed as bbox by render timer)
-      - Proper multiline wrapping via Qt.TextFlag.TextWordWrap
-      - Font auto-sized to fit the bbox height, then shrunk to fit width
-      - Translated background clipped to widget bounds
-      - Optional debug overlay: raw OCR bbox, confidence score, region ID
+    The render timer passes each region's smoothed_bbox as the bbox. The translated text is
+    drawn by render_utils.draw_translated_text: word-wrapped, with the font sized to the box
+    height and then shrunk to fit its width, on a background clipped to the widget.
+    Debug mode adds the raw OCR box, the confidence score and the region id.
     """
 
     _PLACEHOLDER = "📺  Select a region and press  ▶ Start\nto see the live preview"
@@ -368,7 +370,7 @@ class LiveFeedWidget(QWidget):
         sy = scaled.height() / self._orig_h
 
         for entry in self._detections:
-            # Support both 3-tuple (legacy) and 5-tuple (debug) formats
+            # An entry has 3 fields; the region id and confidence (the last 2) are optional.
             bbox, original, translated = entry[0], entry[1], entry[2]
             region_id = entry[3] if len(entry) > 3 else ""
             confidence = entry[4] if len(entry) > 4 else None
@@ -423,7 +425,7 @@ class ControlPanel(QWidget):
     region_changed = pyqtSignal(int, int, int, int)
     language_pair_changed = pyqtSignal(str, str)
     overlay_toggled = pyqtSignal(bool)
-    debug_toggled = pyqtSignal(bool)  # NEW
+    debug_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)

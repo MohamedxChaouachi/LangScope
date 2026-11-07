@@ -222,7 +222,7 @@ def setup_translation_models(from_code: str, to_code: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Translation  (with cache, Goal 1)
+# Translating one text
 # ─────────────────────────────────────────────────────────────────────────────
 
 

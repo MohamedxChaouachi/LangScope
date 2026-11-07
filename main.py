@@ -1,13 +1,13 @@
 """
 main.py — Application Entry Point
 
-New threading model:
+Threads:
   CaptureManager (daemon thread)   — 60 FPS screen grab, writes latest_frame
   OCRWorker      (QThread)         — 8  FPS, reads latest_frame, emits raw_segments_ready
   TranslationWorker (QThread)      — on-demand, translates new/changed text
   QTimer @ 60 FPS                  — reads latest_frame + latest_regions → UI
 
-  PackageSetupThread (QThread)     — one-shot Argos pack downloader (unchanged)
+  PackageSetupThread (QThread)     — one-shot Argos language-pack downloader
 """
 
 import logging
@@ -28,7 +28,7 @@ from translation_worker import TranslationWorker
 from ui import APP_ICON_PATH, ControlPanel
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PackageSetupThread  (unchanged from original)
+# PackageSetupThread
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     render_timer.setInterval(16)  # ~60 FPS
     render_timer.timeout.connect(_render_tick)
 
-    # ── Package setup helpers (unchanged logic) ───────────────────────────────
+    # ── Language pack setup ───────────────────────────────────────────────────
     _setup_threads: list[PackageSetupThread] = []
 
     def _on_setup_finished(from_code: str, to_code: str, success: bool) -> None:

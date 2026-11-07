@@ -1,10 +1,9 @@
 """
 bench_ocr.py — OCR pipeline benchmark harness.
 
-Replaces the old diag_ocr.py (which just ran one CPU readtext() call and
-printed the result). This grabs N real frames from your configured screen
-region, runs them through the *actual* preprocess() + EasyOCRProvider.read()
-pipeline the app uses, and reports timing statistics — not a single sample.
+Grabs N real frames from a screen region, runs them through the actual preprocess() +
+EasyOCRProvider.read() pipeline the app uses, and reports timing statistics over all of
+them, not a single sample.
 
 Usage:
     python bench_ocr.py                       # default: 20 frames, en, GPU auto
@@ -12,18 +11,12 @@ Usage:
     python bench_ocr.py --top 100 --left 100 --width 600 --height 300
     python bench_ocr.py --fp16                # test experimental fp16 path
 
-What this gives you:
-    - preprocess_ms / inference_ms split, not just a single "OCR took Xms"
+What it reports:
+    - the preprocess / inference split, not just a single "OCR took X ms"
     - mean / median / p95 over multiple real frames (single-call timing is
-      noisy — the first call after model load is always much slower, GC
+      noisy: the first call after model load is always much slower, GC
       pauses happen, etc.)
-    - a config comparison table (grayscale-only pipeline fix vs old
-      3-conversion pipeline) so you can quote a real before/after number
-      instead of a guess.
-
-This is also a legitimate CV artifact on its own: it's the kind of
-benchmark harness a hiring manager expects to see next to a performance
-claim like "reduced average OCR latency by X%".
+    - the sustained FPS the machine can deliver at this region size
 """
 
 from __future__ import annotations

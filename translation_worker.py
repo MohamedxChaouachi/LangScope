@@ -1,28 +1,33 @@
 """
 translation_worker.py — Translation worker thread.
 
-Receives list[RawSegment] from OCRWorker via an internal queue.
+TranslationWorker takes the list[RawSegment] that OCRWorker produces for each pass, keeps track
+of the text regions from one pass to the next, translates new or changed text, and publishes an
+immutable snapshot of the regions for the render timer. Other threads talk to it through a
+mailbox; when it falls behind, the oldest waiting batch is dropped.
 
-New in this version:
-  • Region tracking  — TranslationRegions persist across OCR cycles.
-                       New detections are matched to existing regions by
-                       bbox IoU + text similarity before creating new ones.
-  • Bbox smoothing   — EMA applied on each cycle a region is seen.
-  • TTL persistence  — regions stay alive for REGION_TTL seconds after
-                       they stop being detected. miss_count tracks gaps.
-  • Deduplication    — text-hash cache avoids re-translating identical text.
-  • Filters          — numeric, timestamp, same-language guards (unchanged).
+Tracking:
+  • Regions persist across OCR passes. A detection is matched to a tracked region before a new
+    one is created (see Region matching), and each time a region is seen its box is smoothed
+    with an exponential moving average, so overlays do not jitter.
+  • A region the latest pass did not see stays tracked, so it matches again at once if its
+    text comes back, but it is not drawn (unless DISPLAY_GRACE_MISSES allows it a few passes).
+    miss_count counts the passes it has been missed.
+  • _prune() drops regions missed more than MAX_MISSES times, and regions not seen for
+    REGION_TTL seconds. The loop runs it when the mailbox has been empty for a second.
+  • Translations are cached by text hash in a bounded LRU cache, so identical text is not
+    translated twice.
+  • Numbers and timestamps, text already in the target language, and same-language pairs are
+    shown untranslated.
 
-Region matching algorithm:
-  For each new RawSegment:
-    1. Find all live regions whose smoothed_bbox has IoU ≥ IOU_THRESHOLD with
-       the segment's bbox.
-    2. Among those candidates, pick the one with the highest text-similarity
-       (difflib SequenceMatcher ratio).
-    3. If best match ≥ TEXT_SIM_THRESHOLD → update that region in-place.
-    4. Otherwise → create a new region.
-  Unmatched live regions are not destroyed immediately; miss_count is
-  incremented. Regions reaching MAX_MISSES are removed.
+Region matching, for each RawSegment:
+  1. The candidates are the tracked regions that have not been missed more than MAX_MISSES
+     times, that no earlier detection of the same pass has claimed, and whose smoothed_bbox
+     has an IoU of at least IOU_THRESHOLD with the segment's bbox.
+  2. Each candidate scores 0.6 · IoU + 0.4 · text similarity (difflib SequenceMatcher ratio).
+  3. If the best score reaches 0.6 · IOU_THRESHOLD + 0.4 · TEXT_SIM_THRESHOLD (0.40 with the
+     default constants), that region is updated in place. Otherwise a new region is created.
+  A tracked region that no detection claimed has its miss_count incremented.
 """
 
 from __future__ import annotations
@@ -470,11 +475,15 @@ class TranslationWorker(QThread):
         exclude: set | None = None,
     ) -> TranslationRegion | None:
         """
-        Return the best-matching live region for *seg*, or None.
+        Return the tracked region that best matches *seg*, or None.
 
-        Candidates must have IoU ≥ IOU_THRESHOLD with seg.bbox (using their
-        smoothed_bbox for stability). Among candidates, we pick the one with
-        the highest text similarity. Returned only if ≥ TEXT_SIM_THRESHOLD.
+        A candidate has not been missed more than MAX_MISSES times, is not in *exclude* (the
+        regions earlier detections of this pass have claimed), and has an IoU of at least
+        IOU_THRESHOLD with seg.bbox, measured on its smoothed_bbox for stability.
+
+        Each candidate scores 0.6 · IoU + 0.4 · text similarity. The best one is returned if
+        its score reaches 0.6 · IOU_THRESHOLD + 0.4 · TEXT_SIM_THRESHOLD, so a weak overlap
+        needs similar text, and a near-perfect overlap matches even if the text changed.
         """
         best: TranslationRegion | None = None
         best_score: float = -1.0

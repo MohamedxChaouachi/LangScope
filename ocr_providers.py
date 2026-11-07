@@ -2,17 +2,22 @@
 ocr_providers.py — OCR abstraction layer.
 
 BaseOCR defines the interface.
-EasyOCRProvider adds:
-  - Configurable image preprocessing (grayscale, CLAHE contrast, sharpening, upscaling)
-  - Tunable confidence threshold
-  - Per-cycle confidence statistics logging
-  - Reduced missed detections on small text via 1.5–2× upscale
+EasyOCRProvider implements it with EasyOCR:
+  - the reader is built lazily, on whichever thread calls load() or read()
+  - configurable image preprocessing (upscaling, grayscale, CLAHE contrast, sharpening)
+  - a minimum confidence score for detections
+  - confidence statistics, logged at debug level every _LOG_EVERY calls
+  - on a GPU that runs out of memory, recognition batches are halved until the frame fits
 
-Preprocessing pipeline (applied in order when enabled):
-  1. Upscale  — bilinear interpolation (scale 1.0–2.0, default 1.5 for small regions)
-  2. Grayscale — converts to 1-channel then back to 3-channel (EasyOCR accepts both)
-  3. CLAHE contrast — adaptive histogram equalisation on the L channel (Lab)
-  4. Sharpening — unsharp-mask via Gaussian blur subtraction
+Call init_ocr_backend() once at startup, before creating a provider: it probes the GPU and
+fills in BACKEND. Importing this module does not touch torch.
+
+Preprocessing pipeline (each step applied in order when enabled; see PreprocessConfig):
+  1. Upscale   — bilinear interpolation by upscale_factor (default 1.5, for small regions)
+  2. Grayscale — one channel from here on, which EasyOCR accepts
+  3. CLAHE     — adaptive histogram equalisation of the contrast
+  4. Sharpen   — unsharp mask (Gaussian blur subtracted)
+With grayscale off, the frame stays BGR and CLAHE works on the L channel of its Lab version.
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ from models import RawSegment
 log = logging.getLogger("langscope.ocr_providers")
 
 # ── Defaults ───────────────────────────────────────────────────────────────────
-CONFIDENCE: float = 0.35  # lowered from 0.4 → catches more small text
+CONFIDENCE: float = 0.35  # minimum score to keep a detection; low enough to catch small text
 
 EASYOCR_LANG_MAP: dict[str, list[str]] = {
     # Latin-script langs pair their native model with "en" (accented chars + ASCII); EasyOCR allows this combo.
@@ -134,14 +139,9 @@ def preprocess(frame: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
     Returns an array suitable for EasyOCR (grayscale 1-channel when
     cfg.grayscale is on, BGR 3-channel otherwise — EasyOCR accepts both).
 
-    Perf note (fixed): the previous version converted BGR→gray→BGR (undoing
-    the grayscale conversion it just did) so CLAHE could run through a BGR→
-    LAB→BGR round trip. That's three colour-space conversions to end up
-    back in 3-channel BGR containing only grayscale information. When
-    cfg.grayscale is on, we now stay in single-channel the whole way through
-    — CLAHE runs directly on the gray plane instead of on a LAB L-channel —
-    which removes 2 of those 3 conversions and roughly halves the memory
-    EasyOCR has to read for the same visual result.
+    With cfg.grayscale on, the frame becomes a single channel once and stays one: CLAHE and
+    the sharpening run directly on the gray plane, which needs one colour conversion and a
+    third of the memory of a BGR image. Only the colour path goes through Lab.
     """
     img = frame.copy()
 

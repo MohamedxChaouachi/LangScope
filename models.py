@@ -43,17 +43,23 @@ class RegionSnapshot:
 @dataclass
 class TranslationRegion:
     """
-    A fully processed detection with persistence and smoothing data.
+    A text region tracked across OCR passes, with the data for smoothing and pruning.
 
-    Fields added vs. v1:
-        region_id         — stable UUID used for debug overlay and matching.
+    Fields:
+        bbox              — the 4-point bbox of the first sighting; never updated.
+        original_text     — the latest OCR text for this region.
+        translated_text   — its translation; the original text until translated, and for text
+                            that is not translated.
+        timestamp         — monotonic time the region was created.
+        region_id         — stable short id used for the debug overlay and matching.
         confidence        — OCR score of the best-matching detection.
         last_seen         — monotonic time of the most recent OCR sighting.
                             Separate from `timestamp` (creation time).
         smoothed_bbox     — exponentially smoothed bbox corners (4-pt list).
                             Initialised to bbox on first creation.
         miss_count        — how many consecutive OCR cycles this region was
-                            not matched. Used to decide when to prune.
+                            not matched. Decides when the region is hidden, no longer
+                            matched and pruned.
     """
 
     bbox: list

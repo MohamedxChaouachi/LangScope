@@ -1,9 +1,9 @@
 """
 ocr_worker.py — OCR worker thread (8 FPS default).
 
-Reads CaptureManager.latest_frame, applies frame-hash + motion-threshold
-gating so OCR only fires when the screen actually changes, then emits
-raw_segments_ready(list[RawSegment]).
+Reads CaptureManager.latest_frame and asks a FrameChangeGate (a frame hash, then a count of
+noticeably changed pixels) whether the screen changed enough to be worth OCR. If so, it runs
+OCR and emits raw_segments_ready(list[RawSegment]).
 """
 
 from __future__ import annotations

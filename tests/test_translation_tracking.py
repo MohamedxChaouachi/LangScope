@@ -515,8 +515,8 @@ class TestPruning:
         raises=AssertionError,
         reason=(
             "_prune() only runs after a second without messages, so while OCR keeps producing "
-            "batches, dead regions pile up in _regions. The module docstring says regions that "
-            "reach MAX_MISSES are removed."
+            "batches, dead regions (past MAX_MISSES) pile up in _regions, and every later pass "
+            "has more of them to scan. The module docstring documents when _prune() runs."
         ),
     )
     def test_dead_regions_are_removed_while_batches_keep_arriving(

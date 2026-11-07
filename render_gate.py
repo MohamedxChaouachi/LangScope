@@ -41,8 +41,8 @@ class RenderGate:
     def tick(self, frame: object, regions: object) -> Tick:
         now = self._clock()
         if self._window_start is None:
-            # The window starts at the first tick. It used to start at 0.0, which made the
-            # first reading divide by the time since boot instead of by one second.
+            # The window starts at the first tick, not at 0.0: otherwise the first reading
+            # would divide by the time since boot instead of by the length of the window.
             self._window_start = now
 
         # Close the window first: the tick that ends one window is the first of the next, so
