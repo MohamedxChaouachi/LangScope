@@ -18,6 +18,7 @@ Debug Mode toggles, the status line with the FPS counter, and the debug stats st
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 
 import numpy as np
 import qtawesome as qta
@@ -175,24 +176,29 @@ class _ScreenSelectorWindow(QWidget):
         self.setGeometry(self._screen.geometry())
         super().showEvent(e)
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:
+    # The PyQt6 stubs type the argument of an event handler as `QEvent | None`. Qt never passes
+    # None, so these handlers take the event itself, and each one opts out of pyright's override
+    # check on its own line.
+    def keyPressEvent(self, e: QKeyEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if e.key() == Qt.Key.Key_Escape:
             self.cancelled.emit()
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:
+    def mousePressEvent(self, e: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if e.button() == Qt.MouseButton.LeftButton:
             self._origin = self._current = e.pos()
             self.update()
         elif e.button() == Qt.MouseButton.RightButton:
             self.cancelled.emit()
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:
-        if self._origin:
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        # "is not None", not truthiness: a QPoint at (0, 0) is falsy, and a drag that starts
+        # at the top-left pixel of the screen is still a drag.
+        if self._origin is not None:
             self._current = e.pos()
             self.update()
 
-    def mouseReleaseEvent(self, e: QMouseEvent) -> None:
-        if e.button() == Qt.MouseButton.LeftButton and self._origin:
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        if e.button() == Qt.MouseButton.LeftButton and self._origin is not None:
             rect = self._rect()
             self._origin = self._current = None
             if rect.width() > 5 and rect.height() > 5:
@@ -200,11 +206,11 @@ class _ScreenSelectorWindow(QWidget):
             else:
                 self.cancelled.emit()
 
-    def paintEvent(self, _: QPaintEvent) -> None:
+    def paintEvent(self, _: QPaintEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), QColor(0, 0, 0, self._DIM_ALPHA))
-        if self._origin and self._current:
+        if self._origin is not None and self._current is not None:
             r = self._rect()
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
             p.fillRect(r, QColor(0, 0, 0, 255))
@@ -230,6 +236,8 @@ class _ScreenSelectorWindow(QWidget):
             )
 
     def _rect(self) -> QRect:
+        """The dragged rectangle. Only called once a drag has started."""
+        assert self._origin is not None and self._current is not None
         return QRect(self._origin, self._current).normalized()
 
 
@@ -315,7 +323,7 @@ class LiveFeedWidget(QWidget):
         self.setMinimumHeight(250)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._pixmap: QPixmap | None = None
-        self._detections: list[Detection] = []
+        self._detections: Sequence[Detection] = []
         self._orig_w: int = 1
         self._orig_h: int = 1
         self._debug_mode: bool = False
@@ -327,7 +335,7 @@ class LiveFeedWidget(QWidget):
     def update_frame(
         self,
         frame_bgr: np.ndarray,
-        detections: list[Detection],
+        detections: Sequence[Detection],
         orig_w: int,
         orig_h: int,
     ) -> None:
@@ -336,13 +344,21 @@ class LiveFeedWidget(QWidget):
         self._orig_w = max(1, orig_w)
         self._orig_h = max(1, orig_h)
         rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
-        qimg = QImage(rgb.data, orig_w, orig_h, orig_w * 3, QImage.Format.Format_RGB888)
+        # sip accepts any buffer object here, such as the array's memoryview; the stub only
+        # lists bytes, which would need a copy of the whole frame.
+        qimg = QImage(  # pyright: ignore[reportCallIssue]
+            rgb.data,  # pyright: ignore[reportArgumentType]
+            orig_w,
+            orig_h,
+            orig_w * 3,
+            QImage.Format.Format_RGB888,
+        )
         # fromImage copies the pixels into the pixmap, so the QImage (which only wraps the
         # numpy buffer) needs no copy of its own first.
         self._pixmap = QPixmap.fromImage(qimg)
         self.update()
 
-    def paintEvent(self, _: QPaintEvent) -> None:
+    def paintEvent(self, _: QPaintEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -659,7 +675,7 @@ class ControlPanel(QWidget):
     # ── Public API ────────────────────────────────────────────────────────────
 
     def update_live_feed(
-        self, frame_bgr: np.ndarray, detections: list[Detection], orig_w: int, orig_h: int
+        self, frame_bgr: np.ndarray, detections: Sequence[Detection], orig_w: int, orig_h: int
     ) -> None:
         self._feed.update_frame(frame_bgr, detections, orig_w, orig_h)
 
@@ -788,7 +804,7 @@ class ControlPanel(QWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
         """)
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:
+    def keyPressEvent(self, e: QKeyEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if e.key() == Qt.Key.Key_Escape:
             self.close()
         else:

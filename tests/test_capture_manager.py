@@ -209,6 +209,26 @@ class TestRouting:
         assert "mss.grab" in rec.names() and "dxcam.grab" not in rec.names()
         assert manager.latest_frame.shape == (200, 300, 3)
 
+    @pytest.mark.parametrize("region", [IN_PRIMARY, ON_SECOND])
+    def test_mss_is_given_the_region_as_a_plain_dict_with_the_four_keys(
+        self, install, run, rec, region
+    ):
+        manager = install(with_dxcam=False)
+        run(manager, region, until=lambda: "mss.grab" in rec.names())
+        (grabbed, *_) = [event[1] for event in rec.events if event[0] == "mss.grab"]
+        assert grabbed == region
+
+    def test_a_dxcam_backend_without_dxcam_falls_back_to_mss(self, install, run, rec, caplog):
+        # Not reachable through CaptureManager.__init__, which only picks the dxcam backend
+        # when it imported; this checks the guard in the loop itself.
+        manager = install(with_dxcam=False)
+        manager._backend = "dxcam"
+        with caplog.at_level(logging.WARNING, logger="langscope.capture"):
+            run(manager, IN_PRIMARY, until=lambda: manager.latest_frame is not None)
+        assert manager._backend == "mss"
+        assert "mss.grab" in rec.names() and "dxcam.create" not in rec.names()
+        assert any("dxcam is not installed" in r.getMessage() for r in caplog.records)
+
     def test_without_dxcam_everything_uses_mss(self, install, run, rec):
         manager = install(with_dxcam=False)
         run(manager, IN_PRIMARY, until=lambda: manager.latest_frame is not None)

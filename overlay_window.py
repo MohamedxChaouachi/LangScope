@@ -80,7 +80,7 @@ class OverlayWindow(QWidget):
             logical, dpr, screen = native_region_to_logical(capture_rect)
             self._dpr = dpr
             win = self.windowHandle()
-            if win is not None and screen is not None and win.screen() is not screen:
+            if win is not None and win.screen() is not screen:
                 win.setScreen(screen)
             self.setGeometry(logical)
         self._regions = regions
@@ -88,7 +88,9 @@ class OverlayWindow(QWidget):
 
     # ── Paint ─────────────────────────────────────────────────────────────────
 
-    def paintEvent(self, _: QPaintEvent) -> None:
+    # The PyQt6 stubs type an event handler's argument as `QPaintEvent | None`; Qt never passes
+    # None, so this handler takes the event itself and opts out of pyright's override check.
+    def paintEvent(self, _: QPaintEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if not self._active or not self._regions:
             return
 

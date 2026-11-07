@@ -37,7 +37,10 @@ def screen_at_native_point(x: int, y: int) -> QScreen:
     for s in QGuiApplication.screens():
         if screen_native_rect(s).contains(x, y):
             return s
-    return QGuiApplication.primaryScreen()
+    primary = QGuiApplication.primaryScreen()
+    if primary is None:  # Qt reports no primary screen when there are no screens at all
+        raise RuntimeError("No screen is available")
+    return primary
 
 
 def screen_index(screen: QScreen) -> int:
@@ -62,7 +65,7 @@ def local_rect_to_native(screen: QScreen, rect: QRect) -> tuple[int, int, int, i
     return top, left, width, height
 
 
-def native_region_to_logical(region: Region) -> tuple[QRect, float, QScreen | None]:
+def native_region_to_logical(region: Region) -> tuple[QRect, float, QScreen]:
     """
     Convert a native-pixel Region to a logical QRect suitable for
     QWidget.setGeometry().

@@ -25,17 +25,11 @@ import threading
 import time
 from typing import Any
 
-# pyrefly: ignore [missing-import]
-import argostranslate.package
-
-# pyrefly: ignore [missing-import]
-import argostranslate.settings as _argo_settings
-
-# pyrefly: ignore [missing-import]
-import argostranslate.translate
-
-# pyrefly: ignore [missing-import]
-import ctranslate2
+# These packages are heavy, and CI does not install them, so pyright cannot resolve them there.
+import argostranslate.package  # pyright: ignore[reportMissingImports]
+import argostranslate.settings as _argo_settings  # pyright: ignore[reportMissingImports]
+import argostranslate.translate  # pyright: ignore[reportMissingImports]
+import ctranslate2  # pyright: ignore[reportMissingImports]
 
 log = logging.getLogger("langscope.translator")
 

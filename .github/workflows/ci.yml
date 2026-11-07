@@ -59,3 +59,7 @@ jobs:
         run: pip install -r requirements-ci.txt
       - name: Run tests
         run: pytest
+      # Type-check in the same environment as the tests: it has PyQt6, numpy and OpenCV for
+      # pyright to read. The packages CI does not install carry scoped ignores in the code.
+      - name: Type-check
+        run: pyright

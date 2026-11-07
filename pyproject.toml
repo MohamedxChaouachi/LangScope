@@ -37,3 +37,13 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # bench_ocr.py is a command-line tool: its printed report is its output.
 "bench_ocr.py" = ["T201"]
+
+[tool.pyright]
+# The application modules. The tests and the command-line scripts are not type-checked.
+include = ["*.py"]
+exclude = ["bench_ocr.py", "diag_ocr.py", "tests", ".venv"]
+# "standard" is pyright's default. "basic" would switch off reportIncompatibleMethodOverride,
+# which this project wants on (see the Qt event handlers, which opt out one line at a time).
+typeCheckingMode = "standard"
+# The code is fully annotated; keep it that way.
+reportMissingParameterType = "error"

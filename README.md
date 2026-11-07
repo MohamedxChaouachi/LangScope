@@ -180,6 +180,7 @@ pip install -r requirements-ci.txt
 
 ruff check .
 ruff format --check .
+pyright
 pytest
 ```
 

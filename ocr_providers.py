@@ -77,7 +77,7 @@ class PreprocessConfig:
 
 def _detect_gpu() -> bool:
     try:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]  # heavy; CI does not install it
 
         ok = torch.cuda.is_available()
         if ok:
@@ -295,7 +295,7 @@ class EasyOCRProvider(BaseOCR):
                 oom = "out of memory" in str(exc).lower()
                 if not (oom and BACKEND.use_gpu and self._batch_size > 1):
                     raise
-                import torch
+                import torch  # pyright: ignore[reportMissingImports]
 
                 torch.cuda.empty_cache()
                 self._batch_size = max(1, self._batch_size // 2)
@@ -306,7 +306,7 @@ class EasyOCRProvider(BaseOCR):
     # ── Reader cache ──────────────────────────────────────────────────────────
 
     def _get_reader(self, langs: list[str]) -> Any:
-        import easyocr
+        import easyocr  # pyright: ignore[reportMissingImports]  # heavy; CI does not install it
 
         key = tuple(sorted(langs))
         if key in self._cache:

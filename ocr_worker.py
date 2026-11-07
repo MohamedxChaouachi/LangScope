@@ -12,6 +12,7 @@ import hashlib
 import logging
 import threading
 import time
+from typing import Any
 
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -134,7 +135,7 @@ class OCRWorker(QThread):
 
     # ── Public API (main thread) ──────────────────────────────────────────────
 
-    def start(self, *args, **kwargs) -> None:
+    def start(self, *args: Any, **kwargs: Any) -> None:
         self._stop_requested.clear()
         super().start(*args, **kwargs)
 

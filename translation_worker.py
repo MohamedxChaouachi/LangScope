@@ -40,6 +40,7 @@ import re
 import threading
 import time
 from collections import OrderedDict, deque
+from typing import Any
 
 from PyQt6.QtCore import QObject, QThread
 
@@ -157,14 +158,20 @@ class _Mailbox:
     the oldest batch is dropped, because the worker only needs the freshest view of the screen.
     Every other kind of message, such as a language change, is never dropped, so a slow
     translation can't make a control message disappear.
+
+    The payload depends on the kind of message:
+        "segments"       list[RawSegment]  one OCR pass
+        "languages"      (from_code, to_code)
+        "retry_warm_up"  None
+        "stop"           None
     """
 
-    def __init__(self, max_batches: int):
+    def __init__(self, max_batches: int) -> None:
         self._max_batches = max_batches
-        self._messages: deque[tuple[str, object]] = deque()
+        self._messages: deque[tuple[str, Any]] = deque()
         self._changed = threading.Condition()
 
-    def post(self, kind: str, payload: object = None) -> None:
+    def post(self, kind: str, payload: Any = None) -> None:
         with self._changed:
             self._messages.append((kind, payload))
             if kind == "segments":
@@ -173,7 +180,7 @@ class _Mailbox:
                     self._messages.remove(waiting[0])
             self._changed.notify()
 
-    def get(self, timeout: float) -> tuple[str, object] | None:
+    def get(self, timeout: float) -> tuple[str, Any] | None:
         """The oldest message, waiting up to *timeout* seconds for one. None if there is none."""
         with self._changed:
             if not self._messages:
@@ -184,7 +191,7 @@ class _Mailbox:
         with self._changed:
             return any(m[0] == kind for m in self._messages)
 
-    def drain(self) -> list[tuple[str, object]]:
+    def drain(self) -> list[tuple[str, Any]]:
         """Remove and return everything that is waiting, oldest first."""
         with self._changed:
             messages = list(self._messages)
@@ -285,7 +292,7 @@ class TranslationWorker(QThread):
 
     # ── Public API (any thread) ───────────────────────────────────────────────
 
-    def start(self, *args, **kwargs) -> None:
+    def start(self, *args: Any, **kwargs: Any) -> None:
         # Marked active before the thread exists, so a set_languages() call that follows is
         # posted to it instead of being applied from the caller's thread.
         with self._lifecycle:
@@ -424,7 +431,7 @@ class TranslationWorker(QThread):
         matched_ids: set[str] = set()
 
         # Collect segments that need translation (cache misses)
-        to_translate: list[tuple[str, RawSegment, TranslationRegion | None]] = []
+        to_translate: list[tuple[str, RawSegment, TranslationRegion]] = []
 
         for seg in segments:
             # Find best matching existing region (each region may be claimed by

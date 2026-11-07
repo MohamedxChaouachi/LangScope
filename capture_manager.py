@@ -42,9 +42,19 @@ def _primary_monitor_rect() -> tuple[int, int, int, int]:
     return m["left"], m["top"], m["width"], m["height"]
 
 
+def _monitor(region: Region) -> dict[str, int]:
+    """The plain dict mss takes for a region."""
+    return {
+        "top": region["top"],
+        "left": region["left"],
+        "width": region["width"],
+        "height": region["height"],
+    }
+
+
 def _try_dxcam() -> ModuleType | None:
     try:
-        import dxcam
+        import dxcam  # pyright: ignore[reportMissingImports]  # optional dependency
 
         return dxcam
     except ImportError:
@@ -105,6 +115,8 @@ class CaptureManager:
 
     def _loop_dxcam(self) -> None:
         try:
+            if self._dxcam is None:  # the dxcam backend is only chosen when it imported
+                raise RuntimeError("dxcam is not installed")
             camera = self._dxcam.create(output_color="BGR")
         except Exception as exc:
             log.warning("[Capture] DXCam init failed (%s) — switching to MSS.", exc)
@@ -125,7 +137,7 @@ class CaptureManager:
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:
-                    r = dict(self._region)
+                    r = self._region.copy()
                 inside_primary = (
                     r["left"] >= px
                     and r["top"] >= py
@@ -144,7 +156,7 @@ class CaptureManager:
                 else:
                     if sct is None:
                         sct = _mss()
-                    frame = np.array(sct.grab(r))[..., :3]  # BGRA → BGR
+                    frame = np.array(sct.grab(_monitor(r)))[..., :3]  # BGRA → BGR
                 if frame is not None:
                     self.latest_frame = frame
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))
@@ -175,7 +187,7 @@ class CaptureManager:
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:
-                    r = dict(self._region)
-                screenshot = sct.grab(r)
+                    r = self._region.copy()
+                screenshot = sct.grab(_monitor(r))
                 self.latest_frame = np.array(screenshot)[..., :3]  # BGRA → BGR
                 time.sleep(max(0.0, FRAME_INTERVAL - (time.perf_counter() - t0)))

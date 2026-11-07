@@ -104,6 +104,20 @@ class TestScreenAtNativePoint:
         assert screen_at_native_point(4479, 1439) is screens[1]
         assert screen_at_native_point(4480, 1439) is screens[0]  # off the desktop: the primary
 
+    def test_with_no_screens_at_all_it_says_so(self, monkeypatch):
+        class NoScreens:
+            @staticmethod
+            def screens():
+                return []
+
+            @staticmethod
+            def primaryScreen():
+                return None
+
+        monkeypatch.setattr(screen_utils, "QGuiApplication", NoScreens)
+        with pytest.raises(RuntimeError, match="No screen"):
+            screen_at_native_point(10, 10)
+
     def test_a_point_outside_every_screen_falls_back_to_the_primary(self, screens):
         assert screen_at_native_point(9000, 9000) is screens[0]
         assert screen_at_native_point(-1, -1) is screens[0]
