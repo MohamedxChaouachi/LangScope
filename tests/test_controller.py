@@ -8,6 +8,7 @@ directly, since those are what the controller drives.
 """
 
 import threading
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -387,15 +388,98 @@ class TestStartStop:
         assert parts.tx.calls[-1] == ("stop",)
         assert status(parts.panel) == "Running"
 
-    def test_shutdown_waits_for_a_language_pack_that_is_still_installing(self, parts, build, qtbot):
+    def test_shutdown_does_not_wait_for_a_language_pack_that_is_still_installing(
+        self, parts, build, qtbot
+    ):
+        parts.packs.hold_install = threading.Event()
+        c = build()
+        try:
+            parts.panel.language_pair_changed.emit("ja", "en")
+            thread = c._setup_threads[0]
+            assert thread.isRunning()
+            started = time.monotonic()
+            c.shutdown()  # the install is held for up to 5 s; this must not wait for it
+            assert time.monotonic() - started < 2.0
+            assert thread.isRunning()
+        finally:
+            parts.packs.hold_install.set()
+
+    def test_the_result_of_an_install_that_outlives_shutdown_is_ignored(self, parts, build, qtbot):
         parts.packs.hold_install = threading.Event()
         c = build()
         parts.panel.language_pair_changed.emit("ja", "en")
         thread = c._setup_threads[0]
-        assert thread.isRunning()
-        threading.Timer(0.2, parts.packs.hold_install.set).start()
-        c.shutdown()  # blocks until the install returns
-        assert thread.isFinished()
+        c.shutdown()
+        before = status(parts.panel)
+        parts.packs.hold_install.set()
+        assert thread.wait(5)
+        qtbot.wait(50)  # let a queued signal be delivered, if there is one
+        assert status(parts.panel) == before
+
+
+class TestSetupThreads:
+    def test_a_finished_install_is_removed_from_the_list(self, parts, build, qtbot):
+        c = build()
+        parts.panel.language_pair_changed.emit("ja", "en")
+        qtbot.waitUntil(lambda: status(parts.panel) == "✅ ja→en ready", timeout=5000)
+        assert c._setup_threads == []
+
+    def test_a_failed_install_is_removed_from_the_list_too(self, parts, build, qtbot):
+        parts.packs.install_result = False
+        c = build()
+        parts.panel.language_pair_changed.emit("zz", "en")
+        qtbot.waitUntil(lambda: "Download failed" in status(parts.panel), timeout=5000)
+        assert c._setup_threads == []
+
+    def test_an_overlapping_pair_waits_for_the_running_install(self, parts, build, qtbot):
+        parts.packs.hold_install = threading.Event()
+        c = build()
+        parts.panel.language_pair_changed.emit("ja", "en")
+        # ja -> fr pivots through ja -> en, which is being installed right now.
+        parts.panel.language_pair_changed.emit("ja", "fr")
+        assert parts.packs.installs == [("ja", "en")]
+        assert len(c._setup_threads) == 1
+        assert status(parts.panel) == "⬇ Downloading ja→fr pack…"
+
+        parts.packs.hold_install.set()
+        # Once the first install is done, the pair that waited gets its own.
+        qtbot.waitUntil(lambda: parts.packs.installs == [("ja", "en"), ("ja", "fr")], timeout=5000)
+        qtbot.waitUntil(lambda: status(parts.panel) == "✅ ja→fr ready", timeout=5000)
+        assert c._setup_threads == []
+
+    def test_the_same_pair_is_not_installed_twice_at_once(self, parts, build, qtbot):
+        parts.packs.hold_install = threading.Event()
+        c = build()
+        try:
+            parts.panel.language_pair_changed.emit("ja", "en")
+            parts.panel.language_pair_changed.emit("ja", "en")
+            assert parts.packs.installs == [("ja", "en")]
+            assert len(c._setup_threads) == 1
+        finally:
+            parts.packs.hold_install.set()
+
+    def test_a_pair_that_needs_other_packs_installs_alongside(self, parts, build, qtbot):
+        parts.packs.hold_install = threading.Event()
+        c = build()
+        try:
+            parts.panel.language_pair_changed.emit("ja", "en")
+            parts.panel.language_pair_changed.emit("de", "en")
+            qtbot.waitUntil(lambda: len(parts.packs.installs) == 2, timeout=5000)
+            assert len(c._setup_threads) == 2
+        finally:
+            parts.packs.hold_install.set()
+
+    def test_a_waiting_pair_is_dropped_when_the_user_picks_another(self, parts, build, qtbot):
+        parts.packs.hold_install = threading.Event()
+        parts.packs.installed.add(("fr", "en"))
+        build()
+        parts.panel.language_pair_changed.emit("ja", "en")
+        parts.panel.language_pair_changed.emit("ja", "fr")  # waits
+        parts.panel.language_pair_changed.emit("fr", "en")  # already installed: nothing waits
+        parts.packs.hold_install.set()
+        qtbot.waitUntil(lambda: ("retry_warm_up",) in parts.tx.calls, timeout=5000)
+        qtbot.wait(100)
+        assert parts.packs.installs == [("ja", "en")]
 
 
 class TestRenderTick:

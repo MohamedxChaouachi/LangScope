@@ -14,7 +14,8 @@ Tracking:
     text comes back, but it is not drawn (unless DISPLAY_GRACE_MISSES allows it a few passes).
     miss_count counts the passes it has been missed.
   • _prune() drops regions missed more than MAX_MISSES times, and regions not seen for
-    REGION_TTL seconds. The loop runs it when the mailbox has been empty for a second.
+    REGION_TTL seconds. The loop runs it after every OCR batch, and when the mailbox has been
+    empty for a second (a static screen runs no OCR, so nothing else would).
   • Translations are cached by text hash in a bounded LRU cache, so identical text is not
     translated twice.
   • Numbers and timestamps, text already in the target language, and same-language pairs are
@@ -84,6 +85,23 @@ _TIMESTAMP_RE = re.compile(
 def _numeric(text: str) -> bool:
     s = text.strip()
     return sum(c.isalpha() for c in s) < _MIN_ALPHA or bool(_TIMESTAMP_RE.match(s))
+
+
+def init_language_detection() -> None:
+    """Make language detection deterministic. Call once at startup, before any detection.
+
+    langdetect is probabilistic: it seeds its random generator from the clock for every
+    detection, so the same text can come out as two different languages on two calls. That
+    would flip an on-screen line between translated and untranslated. A fixed seed gives the
+    same answer for the same text every time."""
+    try:
+        from langdetect import DetectorFactory
+    except ImportError:
+        log.warning(
+            "langdetect is not installed; text already in the target language is not skipped"
+        )
+        return
+    DetectorFactory.seed = 0
 
 
 @functools.lru_cache(maxsize=4096)
@@ -353,6 +371,8 @@ class TranslationWorker(QThread):
                     self._reset_warm_up_backoff()
                 elif kind == "segments":
                     self._update(payload)
+                    # Also prune here: while batches keep arriving the loop never idles.
+                    self._prune()
                     # A language change that is already waiting makes this result stale.
                     if not self._mailbox.has_pending("languages"):
                         self._publish()

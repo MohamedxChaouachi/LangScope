@@ -502,14 +502,6 @@ class TestPruning:
         worker._prune()
         assert published(worker) == before
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "Dead regions past MAX_MISSES are not pruned while OCR batches keep arriving because "
-            "_prune() only runs when the mailbox is idle."
-        ),
-    )
     def test_dead_regions_are_removed_while_batches_keep_arriving(
         self, translator, clock, no_language_detection, monkeypatch
     ):

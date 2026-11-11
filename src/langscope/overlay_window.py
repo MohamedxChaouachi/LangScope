@@ -102,7 +102,10 @@ class OverlayWindow(QWidget):
         if self._dpr != 1.0:
             p.scale(1.0 / self._dpr, 1.0 / self._dpr)
 
-        W, H = self.width(), self.height()
+        # The painter now draws in native pixels, so the surface the renderer clamps to must
+        # be the window's size in native pixels too, not its logical size.
+        W = round(self.width() * self._dpr)
+        H = round(self.height() * self._dpr)
 
         for reg in self._regions:
             if not reg.has_translation:

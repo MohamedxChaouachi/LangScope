@@ -10,7 +10,7 @@ Threads:
   OCRWorker      (QThread)         — 8  FPS, reads latest_frame, emits raw_segments_ready
   TranslationWorker (QThread)      — on-demand, translates new/changed text
   QTimer @ 60 FPS                  — reads latest_frame + latest_regions → UI
-  PackageSetupThread (QThread)     — one-shot language-pack downloader
+  PackageSetupThread (daemon thread) — one-shot language-pack downloader
 
 The controller gets its collaborators from its caller, so it can be tested with fakes;
 build_controller() makes the real ones.
@@ -19,8 +19,9 @@ build_controller() makes the real ones.
 from __future__ import annotations
 
 import logging
+import threading
 
-from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from langscope.capture_manager import CaptureManager
 from langscope.models import Region
@@ -36,9 +37,29 @@ log = logging.getLogger("langscope.controller")
 DEFAULT_REGION: Region = {"top": 100, "left": 100, "width": 500, "height": 200}
 RENDER_INTERVAL_MS = 16  # ~60 FPS
 
+# Argos pivots a pair through English when it has no direct pack (translator.PIVOT_LANGUAGE).
+# Repeated here so the controller does not import Argos.
+_PIVOT_LANGUAGE = "en"
 
-class PackageSetupThread(QThread):
-    """Installs the language packs for one pair, off the GUI thread."""
+
+def _pack_legs(from_code: str, to_code: str) -> set[tuple[str, str]]:
+    """Every pack that installing from_code -> to_code may download: the direct one, and the two
+    legs of the pivot through English."""
+    legs = {(from_code, to_code)}
+    if _PIVOT_LANGUAGE not in (from_code, to_code):
+        legs |= {(from_code, _PIVOT_LANGUAGE), (_PIVOT_LANGUAGE, to_code)}
+    return legs
+
+
+class PackageSetupThread(QObject):
+    """Installs the language packs for one pair, off the GUI thread.
+
+    It runs on a daemon thread, not a QThread. An install is one long blocking download that
+    cannot be interrupted, and a QThread that is still running when it is destroyed aborts the
+    process. A daemon thread is simply dropped when the application exits, so closing the app
+    never has to wait for a download. It offers the QThread calls the controller and tests use
+    (start, isRunning, wait).
+    """
 
     setup_finished = pyqtSignal(str, str, bool)
 
@@ -47,12 +68,33 @@ class PackageSetupThread(QThread):
     ) -> None:
         super().__init__(parent)
         self._packs = packs
-        self._from_code = from_code
-        self._to_code = to_code
+        self.from_code = from_code
+        self.to_code = to_code
+        self._thread = threading.Thread(
+            target=self._run, name=f"PackageSetup-{from_code}-{to_code}", daemon=True
+        )
 
-    def run(self) -> None:
-        ok = self._packs.install(self._from_code, self._to_code)
-        self.setup_finished.emit(self._from_code, self._to_code, ok)
+    def start(self) -> None:
+        self._thread.start()
+
+    def isRunning(self) -> bool:
+        return self._thread.is_alive()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Block until the install ends (or *timeout* seconds pass). True if it has ended."""
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+    def _run(self) -> None:
+        try:
+            ok = self._packs.install(self.from_code, self.to_code)
+        except Exception:
+            log.exception("Installing %s -> %s failed", self.from_code, self.to_code)
+            ok = False
+        try:
+            self.setup_finished.emit(self.from_code, self.to_code, ok)
+        except RuntimeError:
+            pass  # the Qt side is already gone: the application is exiting
 
 
 class AppController(QObject):
@@ -77,6 +119,9 @@ class AppController(QObject):
         self._render_gate = render_gate if render_gate is not None else RenderGate()
         self._region: Region = DEFAULT_REGION.copy()
         self._setup_threads: list[PackageSetupThread] = []
+        # A pair that was asked for while an install it overlaps was running; see
+        # _trigger_package_setup().
+        self._deferred_pair: tuple[str, str] | None = None
 
         # OCR → TranslationWorker (cross-thread, via queue)
         ocr_worker.raw_segments_ready.connect(tx_worker.enqueue)
@@ -121,11 +166,15 @@ class AppController(QObject):
         self._panel.set_status("⏹ Stopped")
 
     def shutdown(self) -> None:
-        """Stop everything for good, including any language pack that is still installing."""
+        """Stop everything for good.
+
+        A language pack that is still downloading is not waited for: its daemon thread ends with
+        the process, and its result is ignored."""
         self._halt_pipeline()
         for thread in self._setup_threads:
-            thread.quit()
-            thread.wait()
+            thread.setup_finished.disconnect(self._on_setup_finished)
+        self._setup_threads.clear()
+        self._deferred_pair = None
 
     # ── Render timer ──────────────────────────────────────────────────────────
 
@@ -185,6 +234,7 @@ class AppController(QObject):
 
     def _trigger_package_setup(self, from_code: str, to_code: str) -> None:
         panel = self._panel
+        self._deferred_pair = None  # whatever was waiting is no longer what the user wants
         if from_code == to_code:
             panel.set_from_badge("(same lang)")
             panel.set_to_badge("")
@@ -197,6 +247,13 @@ class AppController(QObject):
         panel.set_status(f"⬇ Downloading {from_code}→{to_code} pack…")
         panel.set_from_badge("⬇ Downloading…")
         panel.set_to_badge("⬇ Downloading…")
+        # Two installs that need the same pack would download and write it at the same time.
+        # Wait for the running one instead, then look at this pair again: it may have
+        # installed what this one needs.
+        wanted = _pack_legs(from_code, to_code)
+        if any(wanted & _pack_legs(t.from_code, t.to_code) for t in self._setup_threads):
+            self._deferred_pair = (from_code, to_code)
+            return
         thread = PackageSetupThread(self._packs, from_code, to_code)
         thread.setup_finished.connect(self._on_setup_finished)
         thread.start()
@@ -204,6 +261,9 @@ class AppController(QObject):
 
     def _on_setup_finished(self, from_code: str, to_code: str, success: bool) -> None:
         panel = self._panel
+        self._setup_threads = [
+            t for t in self._setup_threads if (t.from_code, t.to_code) != (from_code, to_code)
+        ]
         if success:
             panel.set_status(f"✅ {from_code}→{to_code} ready")
             panel.set_from_badge("✅ Cached")
@@ -214,6 +274,9 @@ class AppController(QObject):
             panel.set_status(f"❌ Download failed for {from_code}→{to_code}")
             panel.set_from_badge("❌ Failed")
             panel.set_to_badge("❌ Failed")
+        deferred, self._deferred_pair = self._deferred_pair, None
+        if deferred is not None:
+            self._trigger_package_setup(*deferred)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
