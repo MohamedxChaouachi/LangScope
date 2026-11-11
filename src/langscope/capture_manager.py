@@ -31,9 +31,9 @@ FRAME_INTERVAL = 1.0 / TARGET_FPS
 
 def _primary_monitor_rect() -> tuple[int, int, int, int]:
     """(left, top, width, height) of the primary monitor in desktop pixels."""
-    from mss import mss as _mss
+    from mss import MSS
 
-    with _mss() as sct:
+    with MSS() as sct:
         monitors = sct.monitors[1:] or sct.monitors[:1]
     for m in monitors:
         if m.get("is_primary"):
@@ -131,7 +131,7 @@ class CaptureManager:
         sct = None
         fall_back = False
         try:
-            from mss import mss as _mss
+            from mss import MSS
 
             px, py, pw, ph = _primary_monitor_rect()
             while self._running:
@@ -155,7 +155,7 @@ class CaptureManager:
                     )
                 else:
                     if sct is None:
-                        sct = _mss()
+                        sct = MSS()
                     frame = np.array(sct.grab(_monitor(r)))[..., :3]  # BGRA → BGR
                 if frame is not None:
                     self.latest_frame = frame
@@ -181,9 +181,9 @@ class CaptureManager:
             self._loop_mss()
 
     def _loop_mss(self) -> None:
-        from mss import mss as _mss
+        from mss import MSS
 
-        with _mss() as sct:
+        with MSS() as sct:
             while self._running:
                 t0 = time.perf_counter()
                 with self._region_lock:

@@ -1,5 +1,5 @@
 """
-scripts/bench_ocr.py — OCR pipeline benchmark harness.
+scripts/bench_ocr.py - OCR pipeline benchmark harness.
 
 Grabs N real frames from a screen region, runs them through the actual preprocess() +
 EasyOCRProvider.read() pipeline the app uses, and reports timing statistics over all of
@@ -22,23 +22,31 @@ What it reports:
 from __future__ import annotations
 
 import argparse
+import math
 import statistics
 import time
 
 import numpy as np
-from mss import mss
+from mss import MSS
 
 from langscope import ocr_providers as ocrp
 
 
 def grab_frames(region: dict, n: int) -> list[np.ndarray]:
     frames = []
-    with mss() as sct:
+    with MSS() as sct:
         for _ in range(n):
             shot = sct.grab(region)
             frames.append(np.array(shot)[..., :3])
             time.sleep(0.05)
     return frames
+
+
+def p95(samples: list[float]) -> float:
+    """The 95th percentile by the nearest-rank method: the smallest sample that at least 95%
+    of the samples are at or below. With few samples it is simply the largest."""
+    ordered = sorted(samples)
+    return ordered[math.ceil(0.95 * len(ordered)) - 1]
 
 
 def summarize(label: str, samples_ms: list[float]) -> None:
@@ -47,14 +55,9 @@ def summarize(label: str, samples_ms: list[float]) -> None:
         return
     mean = statistics.mean(samples_ms)
     median = statistics.median(samples_ms)
-    p95 = (
-        sorted(samples_ms)[int(len(samples_ms) * 0.95) - 1]
-        if len(samples_ms) > 1
-        else samples_ms[0]
-    )
     print(
         f"{label:<28} mean={mean:7.1f}ms  median={median:7.1f}ms  "
-        f"p95={p95:7.1f}ms  n={len(samples_ms)}"
+        f"p95={p95(samples_ms):7.1f}ms  n={len(samples_ms)}"
     )
 
 
@@ -65,7 +68,7 @@ def run(args: argparse.Namespace) -> None:
 
     if args.fp16:
         ocrp.USE_FP16 = True
-        print("fp16: ENABLED (experimental — will fall back to fp32 on failure)")
+        print("fp16: ENABLED (experimental - will fall back to fp32 on failure)")
 
     ocrp.init_ocr_backend()
     provider = ocrp.EasyOCRProvider(from_code=args.lang)
@@ -98,7 +101,7 @@ def run(args: argparse.Namespace) -> None:
     summarize("total per frame", total_samples)
     print()
     print(f"Effective max sustained FPS: {1000 / statistics.mean(total_samples):.1f}")
-    print("(Compare this against OCR_FPS=8 in langscope/ocr_worker.py — if the mean")
+    print("(Compare this against OCR_FPS=8 in langscope/ocr_worker.py - if the mean")
     print(" total is above 125ms, the pipeline is inference-bound, not")
     print(" gated by the 8 FPS target, and the real fix is a smaller")
     print(" capture region or fewer/cheaper preprocessing steps.)")

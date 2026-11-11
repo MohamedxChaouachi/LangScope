@@ -92,7 +92,8 @@ def install(monkeypatch, rec):
 
         dxcam.create = create
         mss_module = types.ModuleType("mss")
-        mss_module.mss = lambda: FakeMss(rec)
+        # Only the MSS class: mss.mss() is deprecated, and using it must fail here.
+        mss_module.MSS = lambda: FakeMss(rec)
         monkeypatch.setitem(sys.modules, "mss", mss_module)
         if with_dxcam:
             monkeypatch.setitem(sys.modules, "dxcam", dxcam)
