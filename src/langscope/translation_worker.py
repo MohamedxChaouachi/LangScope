@@ -14,7 +14,8 @@ Tracking:
     text comes back, but it is not drawn (unless DISPLAY_GRACE_MISSES allows it a few passes).
     miss_count counts the passes it has been missed.
   • _prune() drops regions missed more than MAX_MISSES times, and regions not seen for
-    REGION_TTL seconds. The loop runs it when the mailbox has been empty for a second.
+    REGION_TTL seconds. The loop runs it after every OCR batch, and when the mailbox has been
+    empty for a second (a static screen runs no OCR, so nothing else would).
   • Translations are cached by text hash in a bounded LRU cache, so identical text is not
     translated twice.
   • Numbers and timestamps, text already in the target language, and same-language pairs are
@@ -353,6 +354,8 @@ class TranslationWorker(QThread):
                     self._reset_warm_up_backoff()
                 elif kind == "segments":
                     self._update(payload)
+                    # Also prune here: while batches keep arriving the loop never idles.
+                    self._prune()
                     # A language change that is already waiting makes this result stale.
                     if not self._mailbox.has_pending("languages"):
                         self._publish()

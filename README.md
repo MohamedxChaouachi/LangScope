@@ -268,7 +268,6 @@ The harness reports preprocess, inference and total mean/median/p95 latency, plu
 - OCR is gated by pixel changes, so very small changes can wait until enough pixels differ. The OCR worker is capped at 8 passes per second, and CPU-only inference can be slow; smaller capture regions help.
 - Regions are selected on one monitor at a time; a capture region cannot span monitors. Secondary-monitor capture uses MSS rather than DXCam.
 - EasyOCR and Argos models/packs download on first use and require local disk space. Argos language packs are commonly around 100 MB each; OCR models can be around 200 MB for Latin-script languages.
-- **Region pruning is incomplete while OCR batches keep arriving.** `_prune()` currently runs only when the worker mailbox is idle. If batches arrive continuously, regions missed beyond `MAX_MISSES` can remain tracked and the tracking work can grow. The strict expected-failure test is `test_dead_regions_are_removed_while_batches_keep_arriving` in `tests/test_translation_tracking.py`.
 - FP16 OCR is experimental and disabled by default; EasyOCR may encounter a dtype mismatch on some configurations.
 
 ---
