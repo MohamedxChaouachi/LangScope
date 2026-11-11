@@ -113,21 +113,21 @@ Measured on a laptop with an Intel Core i5-12450H and an NVIDIA GeForce RTX 2050
 - Preprocessing takes about 3 ms (14 ms for the 600 x 900 region); almost all the time is EasyOCR inference.
 - On this hardware OCR is the bottleneck, at about one pass per second on the GPU for a 600 x 300 region, so the 8-per-second OCR cap is not reached. Smaller regions update faster.
 
-Run these commands in PowerShell from the repository root with the project environment active. The selected rectangle must fit on a connected monitor.
+Run these commands in PowerShell from the repository root with the project environment active; each reproduces one row of the table, in order. The selected rectangle must fit on a connected monitor.
 
 ```powershell
-# CPU: hide the GPU from PyTorch for this process. "-1" matters: setting the variable to ""
-# deletes it in PowerShell, so the GPU would still be used.
-$env:CUDA_VISIBLE_DEVICES = "-1"; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 40 --lang en --top 150 --left 660 --width 600 --height 300
+# GPU, 600 x 300: remove the override so PyTorch can select the GPU.
+Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 10 --lang en --top 150 --left 660 --width 600 --height 300
 
-# CUDA FP32: remove the override so PyTorch can select the GPU.
-Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 40 --lang en --top 150 --left 660 --width 600 --height 300
+# GPU, 600 x 900
+Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 40 --lang en --top 150 --left 660 --width 600 --height 900
 
-# CUDA FP16: experimental; use only after the FP32 run succeeds.
-Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 40 --lang en --top 150 --left 660 --width 600 --height 300 --fp16
+# CPU, 600 x 300: hide the GPU from PyTorch for this process. "-1" matters: setting the variable
+# to "" deletes it in PowerShell, so the GPU would still be used.
+$env:CUDA_VISIBLE_DEVICES = "-1"; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 5 --lang en --top 150 --left 660 --width 600 --height 300
 ```
 
-The harness reports preprocess, inference and total mean/median/p95 latency and the maximum sustained rate. FP16 is opt-in and may fail with a dtype mismatch in EasyOCR; the app's default remains FP32.
+The harness reports preprocess, inference and total mean/median/p95 latency and the maximum sustained rate. Add `--fp16` to try the experimental FP16 path; it may fail with a dtype mismatch in EasyOCR, and the app's default remains FP32.
 
 ---
 
