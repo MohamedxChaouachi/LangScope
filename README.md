@@ -226,25 +226,29 @@ CI runs Ruff, builds and checks the wheel, then runs pytest and Pyright on Windo
 
 OCR inference (EasyOCR's CRAFT detector and CRNN recognizer) is the dominant cost per frame, not the threading pipeline. On GPU, recognition runs in batches of 16 boxes and halves the batch size automatically if the card runs out of VRAM. The debug stats strip shows the live preprocess/inference split.
 
-Fill in this table with the output from the commands below. Use the same screen region for each run; the first model load and warm-up are excluded from the timing samples.
+Measured on a laptop with an Intel Core i5-12450H and an NVIDIA GeForce RTX 2050 (4 GB), Windows, Python 3.14, PyTorch 2.14.1+cu126. EasyOCR, lang=en, FP32, on a region full of English text. The first model load and warm-up are excluded from the timing samples.
 
-| Device | Language | Region | Preprocess mean / median / p95 (ms) | Inference mean / median / p95 (ms) | Total mean / median / p95 (ms) | Sustained FPS |
-|---|---|---|---:|---:|---:|---:|
-| CPU | en | 600 x 300 | — / — / — | — / — / — | — / — / — | — |
-| CUDA, FP32 | en | 600 x 300 | — / — / — | — / — / — | — / — / — | — |
-| CUDA, FP16 (experimental) | en | 600 x 300 | — / — / — | — / — / — | — / — / — | — |
+| Device | Region | Frames | Time per OCR pass, mean / median (ms) | OCR passes per second |
+|---|---|---:|---:|---:|
+| NVIDIA GeForce RTX 2050 laptop GPU (4 GB) | 600 x 300 | 10 | 1134.8 / 1145.9 | 0.9 |
+| NVIDIA GeForce RTX 2050 laptop GPU (4 GB) | 600 x 900 | 40 | 5907.8 / 6152.9 | 0.2 |
+| Intel Core i5-12450H, CPU only | 600 x 300 | 5 | 6970.7 / 6875.3 | 0.1 |
+
+- Preprocessing takes about 3 ms (14 ms for the 600 x 900 region); almost all the time is EasyOCR inference.
+- On this hardware OCR is the bottleneck, at about one pass per second on the GPU for a 600 x 300 region, so the 8-per-second OCR cap is not reached. Smaller regions update faster.
 
 Run these commands in PowerShell from the repository root with the project environment active. The selected rectangle must fit on a connected monitor.
 
 ```powershell
-# CPU: hide CUDA from PyTorch for this process.
-$env:CUDA_VISIBLE_DEVICES = ""; .\.venv\Scripts\python.exe scripts\bench_ocr.py --frames 40 --lang en --top 100 --left 100 --width 600 --height 300
+# CPU: hide the GPU from PyTorch for this process. "-1" matters: setting the variable to ""
+# deletes it in PowerShell, so the GPU would still be used.
+$env:CUDA_VISIBLE_DEVICES = "-1"; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 40 --lang en --top 150 --left 660 --width 600 --height 300
 
 # CUDA FP32: remove the override so PyTorch can select the GPU.
-Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe scripts\bench_ocr.py --frames 40 --lang en --top 100 --left 100 --width 600 --height 300
+Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 40 --lang en --top 150 --left 660 --width 600 --height 300
 
 # CUDA FP16: experimental; use only after the FP32 run succeeds.
-Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe scripts\bench_ocr.py --frames 40 --lang en --top 100 --left 100 --width 600 --height 300 --fp16
+Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -u scripts\bench_ocr.py --frames 40 --lang en --top 150 --left 660 --width 600 --height 300 --fp16
 ```
 
 The harness reports preprocess, inference and total mean/median/p95 latency, plus effective maximum sustained FPS. FP16 is opt-in and may fail with a dtype mismatch in EasyOCR; the benchmark does not change the app's default, which remains FP32.
