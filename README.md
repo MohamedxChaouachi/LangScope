@@ -1,5 +1,3 @@
-![LangScope demo](docs/demo.gif)
-
 # LangScope
 
 [![CI](https://github.com/MohamedxChaouachi/LangScope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/MohamedxChaouachi/LangScope/actions/workflows/ci.yml)
