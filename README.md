@@ -90,7 +90,6 @@ Render timer (60 FPS)  →  live feed panel  and/or  desktop overlay
 
 ### Features
 
-- Two display modes: the in-app live feed, and a click-through, always-on-top desktop overlay
 - GPU acceleration for EasyOCR (PyTorch CUDA) and for translation (CTranslate2 CUDA, float16), with automatic CPU fallback
 - Multi-monitor and mixed-DPI support: the region selector opens on every screen
 - Skips numbers, timestamps, dates and phone numbers, and text already in the target language (detected with langdetect)
@@ -188,16 +187,7 @@ pip install -e ".[dev]"
 
 ### Dependencies
 
-| Package | Purpose |
-|---|---|
-| PyQt6 | UI framework |
-| qtawesome | UI icons |
-| easyocr (with PyTorch) | OCR, optional CUDA acceleration |
-| argostranslate | Offline neural machine translation (CTranslate2) |
-| langdetect | Language identification |
-| mss | Screen capture (fallback and secondary monitors) |
-| numpy | Frame processing |
-| dxcam (optional) | Faster capture on the primary monitor |
+The dependencies and their version ranges are listed in `pyproject.toml`.
 
 OpenCV (`opencv-python-headless`, imported as `cv2`) is used for preprocessing. The `argostranslate` range is bounded on both sides (`>=1.10.0,<1.12`) because `translator.py` reads some of Argos' internals to translate in batches; `tests/test_argos_contract.py` checks them.
 
