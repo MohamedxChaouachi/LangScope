@@ -87,6 +87,23 @@ def _numeric(text: str) -> bool:
     return sum(c.isalpha() for c in s) < _MIN_ALPHA or bool(_TIMESTAMP_RE.match(s))
 
 
+def init_language_detection() -> None:
+    """Make language detection deterministic. Call once at startup, before any detection.
+
+    langdetect is probabilistic: it seeds its random generator from the clock for every
+    detection, so the same text can come out as two different languages on two calls. That
+    would flip an on-screen line between translated and untranslated. A fixed seed gives the
+    same answer for the same text every time."""
+    try:
+        from langdetect import DetectorFactory
+    except ImportError:
+        log.warning(
+            "langdetect is not installed; text already in the target language is not skipped"
+        )
+        return
+    DetectorFactory.seed = 0
+
+
 @functools.lru_cache(maxsize=4096)
 def _detect_is_target(text: str, to_code: str) -> bool:
     try:

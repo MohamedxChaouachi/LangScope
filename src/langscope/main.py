@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-from langscope import ocr_providers, translator
+from langscope import ocr_providers, translation_worker, translator
 from langscope.config import configure_logging, load_config
 from langscope.controller import build_controller
 from langscope.ui import APP_ICON_PATH
@@ -24,10 +24,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the application and return its exit code."""
     configure_logging(load_config())
 
-    # Probe the GPU and set up Argos once, here, after logging is configured so that what they
-    # report is shown. Importing the modules does neither.
+    # Probe the GPU, set up Argos and seed language detection once, here. Logging is configured
+    # first so that what they report is shown. Importing the modules does none of it.
     ocr_providers.init_ocr_backend()
     translator.init_translation_backend()
+    translation_worker.init_language_detection()
 
     app = QApplication(list(sys.argv if argv is None else argv))
 
