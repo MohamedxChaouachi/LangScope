@@ -2,7 +2,6 @@
 
 import pytest
 
-from langscope import main as main_module
 from langscope import translation_worker
 
 langdetect = pytest.importorskip("langdetect")
@@ -33,6 +32,8 @@ def test_init_without_langdetect_installed_does_not_raise(monkeypatch):
 
 
 def test_the_application_seeds_language_detection_at_startup(monkeypatch):
+    # main imports translator, which needs argostranslate; CI does not install it.
+    main_module = pytest.importorskip("langscope.main")
     calls = []
 
     class FakeApp:
