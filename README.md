@@ -31,6 +31,39 @@ For an NVIDIA GPU or DXCam capture, see [Installation](#installation); for every
 
 ---
 
+## Usage and configuration
+
+```bash
+langscope
+```
+
+`python -m langscope` does the same. The command lives in the environment you installed LangScope into, so activate it first or call it by path (for example `.venv\Scripts\langscope`).
+
+1. Choose the source (**FROM**) and target (**TO**) languages. If the language pack is not cached yet, it downloads automatically and the badge next to the dropdown shows progress.
+2. Click **Select Region** and drag over the area to translate. A selector opens on each monitor. Press `Esc` or right-click to cancel.
+3. Click **Start**. The first start loads the models, which can take a few seconds.
+4. Optionally enable **Desktop Overlay** to draw translations over the real screen. The overlay is click-through; untick the checkbox to hide it.
+5. Optionally enable **Debug Mode** to see OCR boxes, confidence scores and timing stats.
+
+Changing the language pair while running clears tracked regions and caches, then re-translates.
+
+| Setting | Where | Default |
+|---|---|---|
+| Log level | `LANGSCOPE_LOGLEVEL` environment variable (`DEBUG`, `INFO`, `WARNING`, ...) | `INFO` |
+| Translation device | `ARGOS_DEVICE_TYPE` / `ARGOS_COMPUTE_TYPE` environment variables | CUDA if available, else CPU |
+| OCR rate | `OCR_FPS` in `src/langscope/ocr_worker.py` | 8 |
+| Change-detection sensitivity | `PIXEL_DELTA`, `MIN_CHANGED_PX` in `src/langscope/ocr_worker.py` | 40, 12 |
+| OCR preprocessing and confidence | `PreprocessConfig` in `src/langscope/ocr_providers.py` | upscale 1.5x, grayscale, CLAHE, sharpen, confidence 0.35 |
+| Region tracking and smoothing | constants at the top of `src/langscope/translation_worker.py` (`IOU_THRESHOLD`, `TEXT_SIM_THRESHOLD`, `EMA_ALPHA`, `MAX_MISSES`, `REGION_TTL`) | see file |
+
+An unknown value for `LANGSCOPE_LOGLEVEL` means `INFO`. For verbose logs:
+
+```powershell
+$env:LANGSCOPE_LOGLEVEL = "DEBUG"; langscope
+```
+
+---
+
 ## How it works
 
 LangScope runs as a small pipeline of threads:
@@ -167,39 +200,6 @@ pip install -e ".[dev]"
 | dxcam (optional) | Faster capture on the primary monitor |
 
 OpenCV (`opencv-python-headless`, imported as `cv2`) is used for preprocessing. The `argostranslate` range is bounded on both sides (`>=1.10.0,<1.12`) because `translator.py` reads some of Argos' internals to translate in batches; `tests/test_argos_contract.py` checks them.
-
----
-
-## Usage and configuration
-
-```bash
-langscope
-```
-
-`python -m langscope` does the same. The command lives in the environment you installed LangScope into, so activate it first or call it by path (for example `.venv\Scripts\langscope`).
-
-1. Choose the source (**FROM**) and target (**TO**) languages. If the language pack is not cached yet, it downloads automatically and the badge next to the dropdown shows progress.
-2. Click **Select Region** and drag over the area to translate. A selector opens on each monitor. Press `Esc` or right-click to cancel.
-3. Click **Start**. The first start loads the models, which can take a few seconds.
-4. Optionally enable **Desktop Overlay** to draw translations over the real screen. The overlay is click-through; untick the checkbox to hide it.
-5. Optionally enable **Debug Mode** to see OCR boxes, confidence scores and timing stats.
-
-Changing the language pair while running clears tracked regions and caches, then re-translates.
-
-| Setting | Where | Default |
-|---|---|---|
-| Log level | `LANGSCOPE_LOGLEVEL` environment variable (`DEBUG`, `INFO`, `WARNING`, ...) | `INFO` |
-| Translation device | `ARGOS_DEVICE_TYPE` / `ARGOS_COMPUTE_TYPE` environment variables | CUDA if available, else CPU |
-| OCR rate | `OCR_FPS` in `src/langscope/ocr_worker.py` | 8 |
-| Change-detection sensitivity | `PIXEL_DELTA`, `MIN_CHANGED_PX` in `src/langscope/ocr_worker.py` | 40, 12 |
-| OCR preprocessing and confidence | `PreprocessConfig` in `src/langscope/ocr_providers.py` | upscale 1.5x, grayscale, CLAHE, sharpen, confidence 0.35 |
-| Region tracking and smoothing | constants at the top of `src/langscope/translation_worker.py` (`IOU_THRESHOLD`, `TEXT_SIM_THRESHOLD`, `EMA_ALPHA`, `MAX_MISSES`, `REGION_TTL`) | see file |
-
-An unknown value for `LANGSCOPE_LOGLEVEL` means `INFO`. For verbose logs:
-
-```powershell
-$env:LANGSCOPE_LOGLEVEL = "DEBUG"; langscope
-```
 
 ---
 
