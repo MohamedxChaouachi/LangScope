@@ -12,7 +12,7 @@ The full text of the Contributor Covenant 2.1 at the link above is what applies;
 
 ## Reporting
 
-If you experience or see behaviour that breaks this code of conduct, report it to the maintainer, Chaouachi Mohamed (`MohamedxChaouachi` on GitHub), using GitHub's **Report content** option on the comment, issue or pull request. Reports are handled privately, and the person reporting is protected from retaliation.
+If you experience or see behaviour that breaks this code of conduct, report it to the maintainer, Chaouachi Mohamed, by email at [mohamedch.pro@gmail.com](mailto:mohamedch.pro@gmail.com). You can also use GitHub's **Report content** option on the comment, issue or pull request. Reports are handled privately, and the person reporting is protected from retaliation.
 
 ## Enforcement
 

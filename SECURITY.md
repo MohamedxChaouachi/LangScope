@@ -13,7 +13,7 @@ LangScope has not had a release yet. Security fixes go to the `main` branch; ple
 
 Please report vulnerabilities privately, not in a public issue, pull request or discussion.
 
-Use GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability**, or go straight to [the new advisory form](https://github.com/MohamedxChaouachi/LangScope/security/advisories/new).
+Use GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability**, or go straight to [the new advisory form](https://github.com/MohamedxChaouachi/LangScope/security/advisories/new). If you cannot use it, email [mohamedch.pro@gmail.com](mailto:mohamedch.pro@gmail.com) instead.
 
 Include what you can of:
 
